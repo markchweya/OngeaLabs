@@ -25,7 +25,7 @@ import json
 import argparse
 import subprocess
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, Union
 
 import numpy as np
 
@@ -88,12 +88,16 @@ VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
         "Ongea Swahili Narrator (OpenBible)": "bookbot/vits-base-sw-KE-OpenBible",
         "Ongea Swahili SALAMA (Prosody-rich)": "EYEDOL/SALAMA_TTS",
     },
-    "amh": {"Ongea Amharic (Meta MMS Base)": "facebook/mms-tts-amh"},
+    # ✅ MMS Amharic is flaky on Windows/Py3.13 -> add backup that works without uroman
+    "amh": {
+        "Ongea Amharic (Meta MMS Base)": "facebook/mms-tts-amh",
+        "Ongea Amharic (SpeechT5 Backup)": "AddisuSeteye/speecht5_tts_amharic",
+    },
     "som": {"Ongea Somali (Meta MMS Base)": "facebook/mms-tts-som"},
     "yor": {"Ongea Yoruba (Meta MMS Base)": "facebook/mms-tts-yor"},
     "sna": {"Ongea Shona (Meta MMS Base)": "facebook/mms-tts-sna"},
     "xho": {"Ongea Xhosa (Meta MMS Base)": "facebook/mms-tts-xho"},
-    "afr": {"Ongea Afrikaans (Meta MMS Base)": "facebook/mms-tts-afr"},  # may fallback to monorepo
+    "afr": {"Ongea Afrikaans (Meta MMS Base)": "facebook/mms-tts-afr"},
     "lin": {"Ongea Lingala (Meta MMS Base)": "facebook/mms-tts-lin"},
     "kon": {"Ongea Kongo (Meta MMS Base)": "facebook/mms-tts-kon"},
 }
@@ -261,13 +265,53 @@ def _get_model_classes():
         from transformers import VitsModel
         return AutoProcessor, VitsModel
 
+def _load_speecht5_bundle(model_id: str):
+    """
+    SpeechT5 needs:
+      - SpeechT5Processor
+      - SpeechT5ForTextToSpeech
+      - Vocoder (HiFiGAN)
+      - A speaker embedding (xvector); we use CMU Arctic default.
+    """
+    import torch
+    from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
+    from datasets import load_dataset
+
+    processor = SpeechT5Processor.from_pretrained(model_id)
+    model = SpeechT5ForTextToSpeech.from_pretrained(model_id)
+    vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
+
+    # Default speaker embedding:
+    # (works fine for single-speaker fine-tunes too)
+    xvec_ds = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
+    spk = torch.tensor(xvec_ds[0]["xvector"]).unsqueeze(0)
+
+    model.to("cpu").eval()
+    vocoder.to("cpu").eval()
+
+    return {
+        "kind": "speecht5",
+        "processor": processor,
+        "model": model,
+        "vocoder": vocoder,
+        "speaker_embedding": spk,
+        "sampling_rate": 16000,
+    }
+
 def _safe_load_model(model_id: str, lang_code: Optional[str] = None):
     """
     Robust loader:
-      1) try model_id directly
-      2) fallback to monorepo: facebook/mms-tts subfolder=models/<lang_code>
+      1) SpeechT5 special-case
+      2) try model_id directly
+      3) fallback to monorepo: facebook/mms-tts subfolder=models/<lang_code>
     """
     import torch
+
+    # 1) SpeechT5 special-case (backup)
+    if "speecht5_tts_amharic" in model_id.lower() or "speecht5" in model_id.lower():
+        return _load_speecht5_bundle(model_id)
+
+    # 2/3) VITS/MMS path
     AutoProcessor, ModelClass = _get_model_classes()
     last_err = None
 
@@ -277,7 +321,7 @@ def _safe_load_model(model_id: str, lang_code: Optional[str] = None):
         if any(getattr(p, "is_meta", False) for p in model.parameters()):
             raise RuntimeError("Model loaded with meta tensors.")
         model.to("cpu"); model.eval()
-        return processor, model
+        return {"kind": "vits", "processor": processor, "model": model}
     except Exception as e:
         last_err = e
 
@@ -289,7 +333,7 @@ def _safe_load_model(model_id: str, lang_code: Optional[str] = None):
             if any(getattr(p, "is_meta", False) for p in model.parameters()):
                 raise RuntimeError("Model loaded with meta tensors.")
             model.to("cpu"); model.eval()
-            return processor, model
+            return {"kind": "vits", "processor": processor, "model": model}
         except Exception as e:
             last_err = e
 
@@ -308,14 +352,70 @@ def _to_1d_float32(audio) -> np.ndarray:
         audio = audio.reshape(-1)
     return audio
 
-def synthesize_raw(processor, model, text: str) -> Tuple[np.ndarray, int]:
-    import torch
+def _encode_inputs_vits(processor, text: str):
+    """
+    Encode for VITS/MMS. If tokenizer yields empty ids, raise clear error.
+    """
     text = clean_text(text)
     if not text:
         raise ValueError("Empty text.")
     inputs = processor(text=text, return_tensors="pt")
+    ids = inputs.get("input_ids", None)
+    if ids is None or ids.numel() == 0 or ids.shape[-1] == 0:
+        raise ValueError(
+            "Tokenizer produced empty input_ids for this text. "
+            "This is a known MMS Amharic issue on some Windows/Python setups. "
+            "Try the SpeechT5 Amharic voice."
+        )
+    return inputs
+
+def synthesize_raw(bundle: Dict[str, Any], text: str, *, model_id: str = "", lang_code: str = "") -> Tuple[np.ndarray, int]:
+    """
+    Raw synthesis for both kinds:
+      - kind=vits (MMS/VITS)
+      - kind=speecht5 (backup)
+    """
+    import torch
+
+    kind = bundle.get("kind", "vits")
+
+    if kind == "speecht5":
+        processor = bundle["processor"]
+        model = bundle["model"]
+        vocoder = bundle["vocoder"]
+        spk = bundle["speaker_embedding"]
+
+        text = clean_text(text)
+        if not text:
+            raise ValueError("Empty text.")
+
+        inputs = processor(text=text, return_tensors="pt")
+        input_ids = inputs["input_ids"]
+
+        with torch.no_grad():
+            speech = model.generate_speech(
+                input_ids=input_ids,
+                speaker_embeddings=spk,
+                vocoder=vocoder
+            )
+
+        audio = _to_1d_float32(speech)
+        sr = int(bundle.get("sampling_rate", TARGET_SR))
+        if audio.size == 0:
+            raise ValueError("Model returned empty audio.")
+        m = float(np.max(np.abs(audio)))
+        if m > 1.0:
+            audio = audio / m
+        return np.clip(audio, -1.0, 1.0), sr
+
+    # VITS/MMS
+    processor = bundle["processor"]
+    model = bundle["model"]
+
+    inputs = _encode_inputs_vits(processor, text)
     with torch.no_grad():
         out = model(**inputs)
+
     if isinstance(out, dict) and "waveform" in out:
         wave = out["waveform"]
     else:
@@ -343,7 +443,7 @@ def split_by_punctuation(text: str) -> List[Tuple[str, str]]:
             out.append((c, punct))
     return out
 
-def synthesize_human(processor, model, text: str) -> Tuple[np.ndarray, int]:
+def synthesize_human(bundle: Dict[str, Any], text: str, *, model_id: str = "", lang_code: str = "") -> Tuple[np.ndarray, int]:
     chunks = split_by_punctuation(text)
     if not chunks:
         raise ValueError("Empty text.")
@@ -353,7 +453,7 @@ def synthesize_human(processor, model, text: str) -> Tuple[np.ndarray, int]:
     pause = {",":0.18, ";":0.22, ":":0.22, ".":0.38, "!":0.42, "?":0.42, "…":0.55}
 
     for chunk_text, punct in chunks:
-        a, sr = synthesize_raw(processor, model, chunk_text)
+        a, sr = synthesize_raw(bundle, chunk_text, model_id=model_id, lang_code=lang_code)
         sr_final = sr_final or sr
         audios.append(a)
         dur = pause.get(punct, 0.0)
@@ -603,10 +703,20 @@ def page_speak(st):
             model_id = voices[voice_name]
 
             with st.spinner(f"Loading {voice_name}..."):
-                processor, model = load_voice(model_id, lang_code)
+                bundle = load_voice(model_id, lang_code)
+
+            # ✅ If Amharic MMS tokenization fails, auto-fallback to SpeechT5 backup
+            if lang_code == "amh" and bundle.get("kind") == "vits":
+                try:
+                    _ = _encode_inputs_vits(bundle["processor"], text)
+                except Exception:
+                    st.warning("Amharic MMS tokenizer failed here. Switching to SpeechT5 backup voice...")
+                    backup_id = voices.get("Ongea Amharic (SpeechT5 Backup)")
+                    bundle = load_voice(backup_id, lang_code)
+                    model_id = backup_id
 
             with st.spinner("Generating speech (human pauses)..."):
-                audio, sr = synthesize_human(processor, model, text)
+                audio, sr = synthesize_human(bundle, text, model_id=model_id, lang_code=lang_code)
                 audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
 
                 out_wav = OUTPUT_DIR / "app_outputs" / f"{lang_code}_speech.wav"
@@ -650,11 +760,22 @@ def page_batch(st):
             load_voice = get_voice_loader()
             model_id = voices[voice_name]
             with st.spinner(f"Loading {voice_name}..."):
-                processor, model = load_voice(model_id, lang_code)
+                bundle = load_voice(model_id, lang_code)
+
+            # ✅ Same Amharic fallback in batch
+            if lang_code == "amh" and bundle.get("kind") == "vits":
+                try:
+                    some_text = next((l for l in lines.split("\n") if l.strip()), "")
+                    _ = _encode_inputs_vits(bundle["processor"], some_text)
+                except Exception:
+                    st.warning("Amharic MMS tokenizer failed. Switching to SpeechT5 backup voice...")
+                    backup_id = voices.get("Ongea Amharic (SpeechT5 Backup)")
+                    bundle = load_voice(backup_id, lang_code)
+                    model_id = backup_id
 
             outs = []
             for i, ln in enumerate([l for l in lines.split("\n") if l.strip()]):
-                audio, sr = synthesize_human(processor, model, ln)
+                audio, sr = synthesize_human(bundle, ln, model_id=model_id, lang_code=lang_code)
                 audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
                 p = OUTPUT_DIR / "app_outputs" / f"{lang_code}_batch_{i+1:02d}.wav"
                 write_wav(p, audio, sr)
@@ -692,6 +813,7 @@ def page_about(st):
         "• 9 African languages\n"
         "• Robust MMS loader with monorepo fallback\n"
         "• Human-like punctuation pauses\n"
+        "• SpeechT5 Amharic backup for Windows MMS tokenizer issues\n"
         "• Failsafe UI (no whitescreen)\n\n"
         "No assets required — models download automatically."
     )
@@ -742,7 +864,7 @@ def run_app():
             st.text(traceback.format_exc())
 
         st.caption("Ongea • Pan-African Text-to-Speech • Meta MMS + Community Voices")
-    
+
     except Exception as e:
         import streamlit as st
         st.error("🔥 Critical app initialization error:")
