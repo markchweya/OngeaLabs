@@ -1,21 +1,12 @@
 # app.py
 """
-ONGEA v5.3 — Pan-African Text-to-Speech Studio (FAILSAFE BUILD)
-Languages: Swahili, Amharic, Somali, Yoruba, Shona, Xhosa, Afrikaans, Lingala, Kongo
-+ Kenya pack: Luo, Agikuyu, Ameru, Akamba, Ekegusii, Luhya, Kalenjin, Maasai, Taita
-
-ONE FILE. No external assets.
+ONGEA v7.0 — Calm One-Page TTS Studio
+WELCOME → STUDIO FLOW • NO MAIN SCROLL • FLOATING TONE POPOVER • CUSTOM LIBRARY
 
 Run:
     streamlit run app.py
 Train:
     python app.py --train --lang swh
-
-Why this version won't white-screen:
-- UI renders BEFORE any heavy CSS.
-- No components.html() CSS injection.
-- No parent.document JS parallax.
-- No render-time model probing.
 """
 
 import os
@@ -29,6 +20,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
+from datetime import datetime
 
 import numpy as np
 
@@ -45,9 +37,7 @@ EVAL_SPLIT = None
 DEFAULT_AUDIO_COL = "audio"
 DEFAULT_TEXT_COL = "text"
 
-# --- LANGUAGES ---
 LANGUAGES: Dict[str, str] = {
-    # Core Pan-African set
     "Swahili (Kiswahili) — KE/TZ/UG": "swh",
     "Amharic (አማርኛ) — ET": "amh",
     "Somali (Soomaaliga) — SO/ET/DJ": "som",
@@ -57,8 +47,6 @@ LANGUAGES: Dict[str, str] = {
     "Afrikaans — ZA/NA": "afr",
     "Lingala — CD/CG": "lin",
     "Kongo (Kikongo) — CD/CG/AO": "kon",
-
-    # Kenya pack (major languages)
     "Luo (Dholuo) — KE": "luo",
     "Gikuyu (Agĩkũyũ) — KE": "kik",
     "Ameru (Kĩmĩrũ / Meru) — KE": "mer",
@@ -89,17 +77,14 @@ EVAL_STEPS = 500
 SAVE_STEPS = 500
 
 LOWERCASE = True
-STRIP_PUNCT = False  # keep punctuation for prosody splitting
+STRIP_PUNCT = False
 
 
 # =========================
-# VOICE LIBRARY (by language)
+# VOICE LIBRARY
 # =========================
 
 VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
-    # -----------------------------
-    # Core languages (original)
-    # -----------------------------
     "swh": {
         "Ongea Swahili Male / Neutral (Meta Base)": "facebook/mms-tts-swh",
         "Ongea Swahili Female (Mozilla Lady)": "Benjamin-png/swahili-mms-tts-mozilla-lady-voice-finetuned",
@@ -115,15 +100,9 @@ VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
     "afr": {"Ongea Afrikaans (Meta MMS Base)": "facebook/mms-tts-afr"},
     "lin": {"Ongea Lingala (Meta MMS Base)": "facebook/mms-tts-lin"},
     "kon": {"Ongea Kongo (Meta MMS Base)": "facebook/mms-tts-kon"},
-
-    # -----------------------------
-    # Kenya pack
-    # -----------------------------
     "luo": {
-        # CLEAR-Global Luo voices (Coqui format; optional)
         "Ongea Luo (CLEAR YourTTS, HF/Coqui)": "coqui:CLEAR-Global/YourTTS-Luo",
         "Ongea Luo (CLEAR XTTS, HF/Coqui)": "coqui:CLEAR-Global/XTTS-Luo",
-        # Meta MMS if it exists in your env / monorepo
         "Ongea Luo (Meta MMS Base)": "facebook/mms-tts-luo",
     },
     "kik": {"Ongea Gikuyu (Meta MMS Base)": "facebook/mms-tts-kik"},
@@ -170,18 +149,14 @@ def detect_columns(ds) -> Tuple[str, str]:
     cols = set(ds.column_names)
     audio_col = DEFAULT_AUDIO_COL if DEFAULT_AUDIO_COL in cols else None
     text_col = DEFAULT_TEXT_COL if DEFAULT_TEXT_COL in cols else None
-
     if audio_col is None:
         for c in cols:
             if "audio" in c or "speech" in c or "wav" in c:
-                audio_col = c
-                break
+                audio_col = c; break
     if text_col is None:
         for c in cols:
             if "text" in c or "transcript" in c or "sentence" in c:
-                text_col = c
-                break
-
+                text_col = c; break
     if audio_col is None or text_col is None:
         raise ValueError(f"Could not auto-detect columns. Found: {cols}")
     return audio_col, text_col
@@ -190,15 +165,13 @@ def load_and_prepare_dataset() -> Tuple[Any, Optional[Any], str, str]:
     from datasets import load_dataset, Audio
     ds_train = load_dataset(HF_DATASET_NAME, HF_DATASET_CONFIG, split=TRAIN_SPLIT)
     ds_eval = load_dataset(HF_DATASET_NAME, HF_DATASET_CONFIG, split=EVAL_SPLIT) if EVAL_SPLIT else None
-
     audio_col, text_col = detect_columns(ds_train)
     ds_train = ds_train.cast_column(audio_col, Audio(sampling_rate=TARGET_SR))
     if ds_eval is not None:
         ds_eval = ds_eval.cast_column(audio_col, Audio(sampling_rate=TARGET_SR))
 
     def _norm(ex):
-        ex[text_col] = clean_text(ex[text_col])
-        return ex
+        ex[text_col] = clean_text(ex[text_col]); return ex
 
     ds_train = ds_train.map(_norm)
     if ds_eval is not None:
@@ -206,13 +179,10 @@ def load_and_prepare_dataset() -> Tuple[Any, Optional[Any], str, str]:
 
     def _keep(ex):
         a = ex[audio_col]
-        if a is None or a.get("array") is None:
-            return False
+        if a is None or a.get("array") is None: return False
         dur = len(a["array"]) / a["sampling_rate"]
-        if dur < MIN_AUDIO_SEC or dur > MAX_AUDIO_SEC:
-            return False
-        if ex[text_col] is None or ex[text_col].strip() == "":
-            return False
+        if dur < MIN_AUDIO_SEC or dur > MAX_AUDIO_SEC: return False
+        if ex[text_col] is None or ex[text_col].strip() == "": return False
         return True
 
     ds_train = ds_train.filter(_keep)
@@ -228,8 +198,7 @@ def maybe_convert_discriminator(lang_code: str) -> str:
     ensure_repo()
     lang_dir.mkdir(parents=True, exist_ok=True)
     run([
-        "python",
-        "convert_original_discriminator_checkpoint.py",
+        "python","convert_original_discriminator_checkpoint.py",
         "--language_code", lang_code,
         "--pytorch_dump_folder_path", str(lang_dir),
     ], cwd=FINETUNE_REPO)
@@ -268,20 +237,14 @@ def build_finetune_config(model_path: str, audio_col: str, text_col: str, lang_c
 def launch_training(lang_code: str):
     _, _, audio_col, text_col = load_and_prepare_dataset()
     model_path = maybe_convert_discriminator(lang_code)
-
     out_dir = OUTPUT_DIR / lang_code
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg = build_finetune_config(model_path, audio_col, text_col, lang_code)
     cfg_path = out_dir / "finetune_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-
     ensure_repo()
     train_script = FINETUNE_REPO / "run_vits_finetuning.py"
-    run([
-        "accelerate", "launch",
-        str(train_script),
-        "--config", str(cfg_path),
-    ], cwd=FINETUNE_REPO)
+    run(["accelerate","launch",str(train_script),"--config",str(cfg_path)], cwd=FINETUNE_REPO)
 
 
 # =========================
@@ -293,9 +256,9 @@ COQUI_PREFIX = "coqui:"
 
 @dataclass
 class VoiceBundle:
-    engine: str               # "hf_vits" or "coqui"
-    processor: Any = None     # HF processor for hf_vits
-    model: Any = None         # HF model OR Coqui TTS object
+    engine: str
+    processor: Any = None
+    model: Any = None
     sr: int = TARGET_SR
     model_id: str = ""
     lang_code: str = ""
@@ -310,25 +273,14 @@ def _get_model_classes():
         return AutoProcessor, VitsModel
 
 def _encode_inputs(processor, text: str):
-    """
-    Safe encoding:
-      - try normal
-      - fallback normalize=False for weird scripts
-      - detect empty input_ids early
-    """
     import torch
     try:
         inputs = processor(text=text, return_tensors="pt")
     except TypeError:
         inputs = processor(text=text, return_tensors="pt", normalize=False)
-
     ids = inputs.get("input_ids", None)
-    if ids is not None:
-        if isinstance(ids, torch.Tensor) and (ids.numel() == 0 or ids.shape[-1] == 0):
-            raise ValueError(
-                "Tokenizer produced empty input_ids for this text. "
-                "This can happen with invisible chars or unsupported script."
-            )
+    if ids is not None and isinstance(ids, torch.Tensor) and (ids.numel() == 0 or ids.shape[-1] == 0):
+        raise ValueError("Tokenizer produced empty input_ids.")
     return inputs
 
 def _maybe_unidecode(text: str) -> str:
@@ -339,28 +291,22 @@ def _maybe_unidecode(text: str) -> str:
         return text
 
 def _safe_load_hf_vits(model_id: str, lang_code: Optional[str] = None) -> VoiceBundle:
-    """
-    Robust HF VITS loader:
-      1) try model_id directly
-      2) fallback to monorepo: facebook/mms-tts subfolder=models/<lang_code>
-    """
     import torch
     AutoProcessor, ModelClass = _get_model_classes()
     last_err = None
 
-    # 1) direct
     try:
         processor = AutoProcessor.from_pretrained(model_id)
         model = ModelClass.from_pretrained(model_id, low_cpu_mem_usage=False, device_map=None)
         if any(getattr(p, "is_meta", False) for p in model.parameters()):
             raise RuntimeError("Model loaded with meta tensors.")
         model.to("cpu"); model.eval()
-        return VoiceBundle(engine="hf_vits", processor=processor, model=model, sr=getattr(processor, "sampling_rate", TARGET_SR),
+        return VoiceBundle(engine="hf_vits", processor=processor, model=model,
+                           sr=getattr(processor, "sampling_rate", TARGET_SR),
                            model_id=model_id, lang_code=lang_code or "")
     except Exception as e:
         last_err = e
 
-    # 2) monorepo fallback
     if lang_code:
         try:
             sub = f"models/{lang_code}"
@@ -369,7 +315,8 @@ def _safe_load_hf_vits(model_id: str, lang_code: Optional[str] = None) -> VoiceB
             if any(getattr(p, "is_meta", False) for p in model.parameters()):
                 raise RuntimeError("Model loaded with meta tensors.")
             model.to("cpu"); model.eval()
-            return VoiceBundle(engine="hf_vits", processor=processor, model=model, sr=getattr(processor, "sampling_rate", TARGET_SR),
+            return VoiceBundle(engine="hf_vits", processor=processor, model=model,
+                               sr=getattr(processor, "sampling_rate", TARGET_SR),
                                model_id=model_id, lang_code=lang_code)
         except Exception as e:
             last_err = e
@@ -377,57 +324,38 @@ def _safe_load_hf_vits(model_id: str, lang_code: Optional[str] = None) -> VoiceB
     raise last_err
 
 def _safe_load_coqui_hf(model_id: str) -> VoiceBundle:
-    """
-    Load custom Coqui (XTTS/YourTTS) checkpoints from HF repos.
-    model_id comes in as 'coqui:<repo_id>'.
-    """
     real_id = model_id[len(COQUI_PREFIX):].strip()
     try:
         from huggingface_hub import snapshot_download
         from TTS.api import TTS as CoquiTTS
     except Exception as e:
-        raise RuntimeError(
-            "Coqui loader requested, but Coqui TTS or huggingface_hub isn't installed. "
-            "Install with: pip install TTS huggingface_hub"
-        ) from e
+        raise RuntimeError("Coqui requested but not installed. pip install TTS huggingface_hub") from e
 
-    local_dir = snapshot_download(repo_id=real_id)
-    local_dir = Path(local_dir)
+    local_dir = Path(snapshot_download(repo_id=real_id))
+    cfgs = list(local_dir.rglob("config.json")) + list(local_dir.rglob("*config*.json"))
+    if not cfgs:
+        raise RuntimeError(f"No config.json found in {real_id}")
+    config_path = str(cfgs[0])
 
-    # find config
-    config_candidates = list(local_dir.rglob("config.json")) + list(local_dir.rglob("*config*.json"))
-    if not config_candidates:
-        raise RuntimeError(f"No Coqui config.json found in HF repo {real_id}.")
-    config_path = str(config_candidates[0])
+    ckpts = []
+    for ext in ("*.pth","*.pt","*.bin","*.safetensors"):
+        ckpts += list(local_dir.rglob(ext))
+    ckpts = [p for p in ckpts if p.is_file()]
+    if not ckpts:
+        raise RuntimeError(f"No checkpoint found in {real_id}")
 
-    # find checkpoint
-    ckpt_candidates = []
-    for ext in ("*.pth", "*.pt", "*.bin", "*.safetensors"):
-        ckpt_candidates += list(local_dir.rglob(ext))
-    ckpt_candidates = [p for p in ckpt_candidates if p.is_file()]
-
-    if not ckpt_candidates:
-        raise RuntimeError(f"No Coqui checkpoint (*.pth/*.pt/*.bin/*.safetensors) found in HF repo {real_id}.")
-    model_path = str(ckpt_candidates[0])
-
-    # Load custom
+    model_path = str(ckpts[0])
     tts = CoquiTTS(model_path=model_path, config_path=config_path, progress_bar=False, gpu=False)
 
-    # sample rate if present
     out_sr = TARGET_SR
     try:
-        out_sr = int(getattr(tts.synthesizer, "output_sample_rate", TARGET_SR))
+        out_sr = int(getattr(tts.synthesizer,"output_sample_rate",TARGET_SR))
     except Exception:
         pass
 
-    return VoiceBundle(engine="coqui", processor=None, model=tts, sr=out_sr, model_id=model_id, lang_code="")
+    return VoiceBundle(engine="coqui", model=tts, sr=out_sr, model_id=model_id)
 
 def _safe_load_model(model_id: str, lang_code: Optional[str] = None) -> VoiceBundle:
-    """
-    Unified loader:
-      - if "coqui:" prefix => Coqui HF custom loader
-      - else => HF VITS/MMS loader
-    """
     if model_id.startswith(COQUI_PREFIX):
         return _safe_load_coqui_hf(model_id)
     return _safe_load_hf_vits(model_id, lang_code=lang_code)
@@ -446,16 +374,12 @@ def _to_1d_float32(audio) -> np.ndarray:
     return audio
 
 def synthesize_raw(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
-    """
-    Raw synthesis for either HF VITS or Coqui.
-    """
     import numpy as np
     text = clean_text(text)
     if not text:
         raise ValueError("Empty text.")
 
     if bundle.engine == "coqui":
-        # Coqui expects native script; if it fails, try unidecode fallback.
         try:
             wave = bundle.model.tts(text)
         except Exception:
@@ -463,30 +387,25 @@ def synthesize_raw(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
         audio = _to_1d_float32(wave)
         sr = int(bundle.sr or TARGET_SR)
         if audio.size == 0:
-            raise ValueError("Coqui model returned empty audio.")
+            raise ValueError("Coqui returned empty audio.")
         m = float(np.max(np.abs(audio)))
-        if m > 1.0:
-            audio = audio / m
+        if m > 1.0: audio = audio / m
         return np.clip(audio, -1.0, 1.0), sr
 
-    # HF VITS path
     processor, model = bundle.processor, bundle.model
     inputs = _encode_inputs(processor, text)
     import torch
     with torch.no_grad():
         out = model(**inputs)
-    if isinstance(out, dict) and "waveform" in out:
-        wave = out["waveform"]
-    else:
-        wave = getattr(out, "waveform", None) or out[0]
 
+    wave = out["waveform"] if isinstance(out, dict) and "waveform" in out else getattr(out, "waveform", None) or out[0]
     audio = _to_1d_float32(wave)
     sr = int(getattr(processor, "sampling_rate", TARGET_SR))
+
     if audio.size == 0:
         raise ValueError("Model returned empty audio.")
     m = float(np.max(np.abs(audio)))
-    if m > 1.0:
-        audio = audio / m
+    if m > 1.0: audio = audio / m
     return np.clip(audio, -1.0, 1.0), sr
 
 def split_by_punctuation(text: str) -> List[Tuple[str, str]]:
@@ -506,7 +425,6 @@ def synthesize_human(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
     chunks = split_by_punctuation(text)
     if not chunks:
         raise ValueError("Empty text.")
-
     audios = []
     sr_final = bundle.sr or TARGET_SR
     pause = {",":0.18, ";":0.22, ":":0.22, ".":0.38, "!":0.42, "?":0.42, "…":0.55}
@@ -521,8 +439,7 @@ def synthesize_human(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
 
     audio = np.concatenate(audios) if len(audios) > 1 else audios[0]
     m = float(np.max(np.abs(audio))) if audio.size else 1.0
-    if m > 1.0:
-        audio = audio / m
+    if m > 1.0: audio = audio / m
     return np.clip(audio, -1.0, 1.0), sr_final
 
 def apply_tone(audio: np.ndarray, sr: int, speed: float, pitch_semitones: float) -> np.ndarray:
@@ -534,8 +451,7 @@ def apply_tone(audio: np.ndarray, sr: int, speed: float, pitch_semitones: float)
         if pitch_semitones != 0.0:
             y = librosa.effects.pitch_shift(y, sr=sr, n_steps=pitch_semitones)
         m = float(np.max(np.abs(y))) if y.size else 1.0
-        if m > 1.0:
-            y = y / m
+        if m > 1.0: y = y / m
         return np.clip(y, -1.0, 1.0)
     except Exception:
         return audio
@@ -547,128 +463,222 @@ def write_wav(path: Path, audio: np.ndarray, sr: int):
 
 
 # =========================
-# STREAMLIT UI (FAILSAFE)
+# STREAMLIT UI
 # =========================
 
-SAFE_CSS = """
+BASE_CSS = """
 <style>
 :root{
   --bg1:#050814; --bg2:#0B1633; --bg3:#052F2A;
-  --glass:rgba(255,255,255,0.08);
   --accent:#00E0B8; --accent2:#F9C74F;
-  --txt:#EAF2FF; --muted:rgba(234,242,255,0.72);
+  --txt:#EAF2FF; --muted:rgba(234,242,255,0.70);
 }
 
-/* Main background - MINIMAL to avoid conflicts */
+/* remove Streamlit chrome */
+#MainMenu, footer, header {visibility:hidden;}
+[data-testid="stToolbar"]{display:none !important;}
+[data-testid="stStatusWidget"]{display:none !important;}
+[data-testid="stHeader"]{display:none !important;}
+[data-testid="stDecoration"]{display:none !important;}
+
+/* NO SCROLL MAIN */
+html, body {height:100% !important; overflow:hidden !important;}
 [data-testid="stAppViewContainer"]{
-  background: linear-gradient(135deg,#050814,#0B1633,#052F2A) !important;
+  height:100vh !important; overflow:hidden !important;
+  background: radial-gradient(1200px 800px at 10% 0%, #0a1230 0%, transparent 50%),
+              radial-gradient(1000px 700px at 95% 20%, #063a33 0%, transparent 55%),
+              linear-gradient(135deg,var(--bg1),var(--bg2),var(--bg3)) !important;
   color: var(--txt) !important;
 }
-
 [data-testid="stMain"]{
-  background: transparent !important;
+  height:100vh !important; overflow:hidden !important; background:transparent !important;
 }
-
 .block-container{
+  height:100vh !important; overflow:hidden !important;
+  max-width:1280px;
+  padding:1.0rem 1.2rem 0.6rem 1.2rem !important;
+}
+
+/* ALLOW SIDEBAR SCROLL (library only) */
+[data-testid="stSidebar"]{
+  height:100vh !important;
+  transition: transform .28s ease, width .28s ease;
   background: transparent !important;
-  max-width:1120px; 
-  padding-top:0.9rem;
+}
+[data-testid="stSidebar"] > div{
+  height:100vh !important;
+  overflow:auto !important;
+  background: linear-gradient(180deg, rgba(7,12,30,0.98), rgba(7,25,22,0.98)) !important;
+  border-right:1px solid rgba(255,255,255,0.06);
 }
 
-/* Ensure text is visible */
-body, p, span, h1, h2, h3, h4, h5, h6{
-  color: var(--txt) !important;
-}
+/* typography */
+body, p, span, h1, h2, h3, h4, h5, h6{color:var(--txt) !important;}
+.small-muted{color:var(--muted); font-size:0.95rem}
 
-.glass{
-  background: rgba(11, 22, 51, 0.7) !important;
-  border:1px solid rgba(255,255,255,0.12);
-  border-radius:18px;
-  padding:1.05rem 1.15rem;
-  box-shadow:0 10px 35px rgba(0,0,0,0.30);
-  transition:transform .25s ease, box-shadow .25s ease, border .25s ease;
+/* Calm inputs (no boxes around sections) */
+textarea{
+  background:rgba(8,12,25,0.96) !important;
+  border:1px solid rgba(255,255,255,0.10) !important;
+  color:var(--txt) !important;
+  border-radius:12px !important;
+  font-size:0.98rem !important;
 }
-.glass:hover{
-  transform: translateY(-3px);
-  border-color:rgba(0,224,184,0.7);
-  box-shadow:0 14px 45px rgba(0,224,184,0.20);
-}
-
-.ongea-title{
-  font-size:3.1rem; font-weight:900; letter-spacing:.02em;
-  color: #00E0B8 !important;
-}
-.ongea-sub{color:var(--muted);font-size:1.07rem;margin-top:.2rem}
-
-#ongea-nav{
-  display:flex; gap:.45rem; padding:.55rem .6rem; margin:.8rem 0 .9rem 0;
-  background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,.10);
-  border-radius:16px;
-  box-shadow:0 8px 24px rgba(0,0,0,.28);
-}
-#ongea-nav .stButton button{
-  width:100%;
-  background:transparent !important;
+div[data-baseweb="select"] > div{
+  background:rgba(8,12,25,0.88) !important;
   border:1px solid rgba(255,255,255,.12) !important;
-  color:var(--txt) !important; border-radius:12px !important;
-  font-weight:800 !important; letter-spacing:.02em;
-  padding:.55rem .8rem !important;
-  transition:all .18s ease !important;
-}
-#ongea-nav .stButton button:hover{
-  transform:translateY(-1px) scale(1.02);
-  border-color:rgba(0,224,184,.9) !important;
-  box-shadow:0 10px 26px rgba(0,224,184,.22);
-}
-#ongea-nav .active .stButton button{
-  background:linear-gradient(135deg, rgba(0,224,184,.18), rgba(249,199,79,.12)) !important;
-  border-color:rgba(0,224,184,.9) !important;
+  border-radius:12px !important;
+  color:var(--txt) !important;
 }
 
+/* buttons */
 .stButton button{
-  background:linear-gradient(135deg,rgba(0,224,184,0.22),rgba(249,199,79,0.14)) !important;
-  border:1px solid rgba(0,224,184,0.7) !important;
-  color:var(--txt) !important; border-radius:12px !important; font-weight:800 !important;
-  transition:all .18s ease !important; box-shadow:0 10px 24px rgba(0,0,0,0.25);
+  background:linear-gradient(135deg,rgba(0,224,184,0.18),rgba(249,199,79,0.10)) !important;
+  border:1px solid rgba(0,224,184,0.65) !important;
+  color:var(--txt) !important;
+  border-radius:12px !important;
+  font-weight:900 !important;
+  padding:0.55rem 0.9rem !important;
+  transition:all .18s ease !important;
+  box-shadow:0 8px 20px rgba(0,0,0,0.22);
 }
 .stButton button:hover{transform:translateY(-2px) scale(1.02);}
 
-textarea{
-  background:rgba(8,12,25,0.98) !important;
-  border:1px solid rgba(255,255,255,0.12) !important;
-  color:var(--txt) !important; border-radius:14px !important;
+/* custom tabs calm */
+div[data-testid="stTabs"]{margin-top:0.5rem !important;}
+div[data-testid="stTabs"] > div[role="tablist"]{
+  gap:0.6rem; padding:0.15rem 0;
+  background:transparent;
+  border-bottom:1px solid rgba(255,255,255,0.08);
+}
+div[data-testid="stTabs"] > div[role="tablist"] button{
+  background:transparent !important;
+  color:var(--txt) !important;
+  border:none !important;
+  border-bottom:2px solid transparent !important;
+  border-radius:0 !important;
+  font-weight:900 !important;
+  padding:0.4rem 0.25rem !important;
+  transition:all .18s ease !important;
+}
+div[data-testid="stTabs"] > div[role="tablist"] button[aria-selected="true"]{
+  border-bottom:2px solid var(--accent) !important;
+  color:var(--accent) !important;
+}
+div[data-testid="stTabs"] > div[role="tabpanel"]{
+  padding-top:0.7rem !important;
 }
 
-div[data-baseweb="select"] > div{
-  background:rgba(8,12,25,0.9) !important;
-  border:1px solid rgba(255,255,255,.14) !important;
-  border-radius:12px !important;
-  color:var(--txt) !important;
-  transition:border .18s ease, box-shadow .18s ease;
+/* Crafting overlay ONLY */
+#crafting-overlay{
+  position: fixed; right: 1.4rem; bottom: 1.4rem;
+  width: 250px;
+  background: rgba(10, 16, 36, 0.88);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:16px;
+  padding:0.85rem 0.95rem;
+  box-shadow:0 10px 34px rgba(0,0,0,0.48);
+  z-index: 9999; backdrop-filter: blur(8px);
 }
-div[data-baseweb="select"] > div:hover{
-  border-color:rgba(0,224,184,.85) !important;
-  box-shadow:0 0 0 2px rgba(0,224,184,.18);
+.dotbar{display:flex; gap:6px; align-items:flex-end; height:18px;}
+.dotbar span{
+  width:8px; border-radius:6px; background: rgba(0,224,184,0.9);
+  animation:bounce 0.8s infinite ease-in-out;
 }
-div[data-baseweb="select"] span{color:var(--txt) !important;}
-div[data-baseweb="popover"]{background:rgba(8,12,25,0.98) !important;}
+.dotbar span:nth-child(1){height:6px; animation-delay:0.0s;}
+.dotbar span:nth-child(2){height:8px; animation-delay:0.1s;}
+.dotbar span:nth-child(3){height:10px; animation-delay:0.2s;}
+.dotbar span:nth-child(4){height:14px; animation-delay:0.3s;}
+.dotbar span:nth-child(5){height:18px; animation-delay:0.4s;}
+.dotbar span:nth-child(6){height:16px; animation-delay:0.5s;}
+.dotbar span:nth-child(7){height:12px; animation-delay:0.6s;}
+@keyframes bounce{0%,100%{transform:translateY(0);opacity:.5;}50%{transform:translateY(-6px);opacity:1;}}
+#crafting-text{margin-top:0.45rem;font-size:0.93rem;color:var(--muted);}
+
+/* sidebar cards */
+.sidebar-title{
+  font-size:1.1rem; font-weight:900; letter-spacing:.02em; color:var(--accent);
+  margin:0.7rem 0 0.25rem 0;
+}
+.sidebar-card{
+  background: rgba(11, 22, 51, 0.85);
+  border:1px solid rgba(255,255,255,0.10);
+  border-radius:14px;
+  padding:0.6rem 0.7rem;
+  margin-bottom:0.55rem;
+  box-shadow:0 6px 18px rgba(0,0,0,0.28);
+}
+.sidebar-meta{font-size:0.82rem;color:var(--muted);margin-bottom:0.35rem;}
+
+/* Floating Library toggle */
+#library-toggle-wrap{
+  position:fixed;
+  left:1.2rem;
+  top:1.2rem;
+  z-index:9998;
+}
+#library-toggle-wrap .stButton button{
+  width:auto !important;
+  padding:0.45rem 0.8rem !important;
+  border-radius:999px !important;
+  font-weight:900 !important;
+  letter-spacing:.03em;
+  background:rgba(0,224,184,0.12) !important;
+  border:1px solid rgba(0,224,184,0.8) !important;
+  box-shadow:0 10px 30px rgba(0,0,0,0.35);
+  backdrop-filter: blur(10px);
+}
+
+/* Welcome hero */
+#welcome-wrap{
+  height:92vh; display:flex; align-items:center; justify-content:center;
+}
+#welcome-hero{
+  text-align:center; max-width:780px;
+}
+#welcome-title{
+  font-size:4.2rem; font-weight:1000; letter-spacing:0.02em; color:var(--accent);
+}
+#welcome-sub{
+  margin-top:0.6rem; font-size:1.05rem; color:var(--muted);
+}
+#welcome-cta{
+  margin-top:1.6rem;
+}
 </style>
 """
 
-def inject_theme(st):
-    st.markdown(SAFE_CSS, unsafe_allow_html=True)
+def inject_theme(st, sidebar_open: bool):
+    sidebar_css = ""
+    if not sidebar_open:
+        sidebar_css = """
+<style>
+[data-testid="stSidebar"]{
+  transform: translateX(-105%) !important;
+  width:0 !important; min-width:0 !important;
+}
+</style>
+"""
+    st.markdown(BASE_CSS + sidebar_css, unsafe_allow_html=True)
 
-def header_block(st):
-    st.markdown(
-        """
-<div class="glass">
-  <div class="ongea-title">Ongea</div>
-  <div class="ongea-sub">Pan-African TTS Studio • Meta MMS + Community Voices</div>
+def show_crafting_overlay(st, text="Crafting voice..."):
+    ph = st.empty()
+    ph.markdown(
+        f"""
+<div id="crafting-overlay">
+  <div class="dotbar">
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+  <div id="crafting-text">{text}</div>
 </div>
         """,
         unsafe_allow_html=True
     )
+    return ph
+
+def hide_overlay(ph):
+    try: ph.empty()
+    except Exception: pass
 
 def get_voice_loader():
     import streamlit as st
@@ -678,91 +688,177 @@ def get_voice_loader():
     return load_voice
 
 def _init_state(st):
-    if "page" not in st.session_state:
-        st.session_state.page = "Speak"
+    if "mode" not in st.session_state:
+        st.session_state.mode = "welcome"  # welcome | studio
     if "lang_name" not in st.session_state:
         st.session_state.lang_name = list(LANGUAGES.keys())[0]
+    if "speak_text" not in st.session_state:
+        st.session_state.speak_text = ""
+    if "batch_lines" not in st.session_state:
+        st.session_state.batch_lines = ""
+    if "history" not in st.session_state:
+        st.session_state.history = []
+    if "latest_idx" not in st.session_state:
+        st.session_state.latest_idx = None
+    if "sidebar_open" not in st.session_state:
+        st.session_state.sidebar_open = True
+    if "speak_speed" not in st.session_state:
+        st.session_state.speak_speed = 1.0
+    if "speak_pitch" not in st.session_state:
+        st.session_state.speak_pitch = 0.0
 
-def render_nav(st):
-    pages = ["Speak", "Batch", "Fine-tune", "About"]
-    st.markdown('<div id="ongea-nav">', unsafe_allow_html=True)
-    cols = st.columns(len(pages))
-    for i, p in enumerate(pages):
-        active = (st.session_state.page == p)
-        with cols[i]:
-            st.markdown('<div class="active">' if active else "<div>", unsafe_allow_html=True)
-            if st.button(p, key=f"nav_{p}", use_container_width=True):
-                st.session_state.page = p
-            st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-def language_panel(st):
-    st.markdown("<div class='glass'>", unsafe_allow_html=True)
-    lang_name = st.selectbox(
-        "Language",
-        list(LANGUAGES.keys()),
-        index=list(LANGUAGES.keys()).index(st.session_state.lang_name),
-        key="lang_select",
-        help="Pick a language. Voices update automatically."
-    )
-    st.session_state.lang_name = lang_name
-    st.markdown("</div>", unsafe_allow_html=True)
-    return lang_name
-
-def page_speak(st):
-    lang_name = language_panel(st)
-    lang_code = LANGUAGES[lang_name]
+def get_voices_for(lang_code: str, lang_name: str):
     voices = VOICE_LIBRARY_BY_LANG.get(lang_code, {})
     if not voices:
         voices = {f"Ongea {lang_name} (Meta MMS Base)": f"facebook/mms-tts-{lang_code}"}
+    return voices
 
-    colA, colB = st.columns([2, 1], gap="large")
+
+# ---------- SIDEBAR LIBRARY ----------
+
+def render_sidebar_library(st):
+    sb = st.sidebar
+    sb.markdown("<div class='sidebar-title'>Library</div>", unsafe_allow_html=True)
+    sb.caption("Generated speeches in this session.")
+
+    if not st.session_state.history:
+        sb.markdown("<div class='sidebar-card'>No speech yet.</div>", unsafe_allow_html=True)
+        return
+
+    for item in reversed(st.session_state.history):
+        sb.markdown("<div class='sidebar-card'>", unsafe_allow_html=True)
+        sb.markdown(
+            f"<div class='sidebar-meta'>"
+            f"{item['ts']} • {item['lang_name'].split('—')[0].strip()}<br>"
+            f"{item['voice_name']}"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+        sb.audio(item["wav_path"], format="audio/wav")
+        sb.download_button(
+            "Download",
+            data=Path(item["wav_path"]).read_bytes(),
+            file_name=Path(item["wav_path"]).name,
+            mime="audio/wav",
+            use_container_width=True,
+            key=f"sb_dl_{item['id']}"
+        )
+        sb.markdown("</div>", unsafe_allow_html=True)
+
+    sb.markdown("---")
+    if sb.button("🗑️ Clear Library", use_container_width=True):
+        st.session_state.history = []
+        st.session_state.latest_idx = None
+        st.rerun()
+
+
+# ---------- WELCOME MODE ----------
+
+def welcome_screen(st):
+    st.markdown(
+        """
+<div id="welcome-wrap">
+  <div id="welcome-hero">
+    <div id="welcome-title">Ongea</div>
+    <div id="welcome-sub">
+      A calm studio for African voices. Type, choose a voice, and generate.
+    </div>
+    <div id="welcome-cta"></div>
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True
+    )
+    # center CTA using columns
+    _, mid, _ = st.columns([1,1.2,1])
+    with mid:
+        if st.button("✨ Generate Speech", use_container_width=True, key="cta_generate"):
+            st.session_state.mode = "studio"
+            st.rerun()
+
+    # tiny footer hint (no tagline)
+    st.caption("")
+
+
+# ---------- STUDIO TOP ROW ----------
+
+def studio_top_row(st):
+    c1, c2 = st.columns([1.25, 1.0], gap="small")
+    with c1:
+        lang_name = st.selectbox(
+            "Language",
+            list(LANGUAGES.keys()),
+            index=list(LANGUAGES.keys()).index(st.session_state.lang_name),
+            key="lang_select",
+        )
+        st.session_state.lang_name = lang_name
+    with c2:
+        lang_code = LANGUAGES[lang_name]
+        voices = get_voices_for(lang_code, lang_name)
+        voice_name = st.selectbox("Voice / Model", list(voices.keys()), key="voice_select")
+    return lang_name, LANGUAGES[lang_name], voice_name, voices
+
+
+# ---------- SPEAK TAB ----------
+
+def speak_tab(st, lang_name, lang_code, voice_name, voices):
+    colA, colB = st.columns([2.1, 1.0], gap="small")
+
     with colA:
-        st.markdown("<div class='glass'>", unsafe_allow_html=True)
         text = st.text_area(
             f"Enter text ({lang_name.split('—')[0].strip()}):",
-            height=180,
-            placeholder="Type something... then hit Speak."
+            height=140,
+            placeholder="Type something... then hit Speak.",
+            key="speak_text_area",
+            value=st.session_state.speak_text
         )
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.session_state.speak_text = text
 
-        c1, c2, c3 = st.columns(3)
-        speak = c1.button("🔊 Speak", use_container_width=True)
-        clear = c2.button("🧹 Clear", use_container_width=True)
-        demo  = c3.button("✨ Demo", use_container_width=True)
+        # Tone popover (floating)
+        tone_pop = st.popover("🎛️ Tone")
+        with tone_pop:
+            st.session_state.speak_speed = st.slider(
+                "Speed", 0.75, 1.50, st.session_state.speak_speed, 0.05
+            )
+            st.session_state.speak_pitch = st.slider(
+                "Pitch (semitones)", -4.0, 4.0, st.session_state.speak_pitch, 0.5
+            )
+            st.caption("Tone applies on next Speak/Batch.")
+
+        b1, b2, b3 = st.columns(3, gap="small")
+        speak = b1.button("🔊 Speak", use_container_width=True, key="btn_speak")
+        clear = b2.button("🧹 Clear", use_container_width=True, key="btn_clear")
+        demo  = b3.button("✨ Demo", use_container_width=True, key="btn_demo")
 
     with colB:
-        st.markdown("<div class='glass'>", unsafe_allow_html=True)
-        voice_name = st.selectbox("Voice / Model", list(voices.keys()), key="voice_select")
-        speed = st.slider("Speed", 0.75, 1.50, 1.0, 0.05)
-        pitch = st.slider("Pitch (semitones)", -4.0, 4.0, 0.0, 0.5)
-        st.caption("Human punctuation pauses ON.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.subheader("🎧 Latest Speech")
+        if st.session_state.latest_idx is None:
+            st.markdown("<div class='small-muted'>Generate speech and it appears here instantly.</div>", unsafe_allow_html=True)
+        else:
+            last = st.session_state.history[st.session_state.latest_idx]
+            st.caption(f"{last['ts']} • {last['lang_name'].split('—')[0].strip()}")
+            st.audio(last["wav_path"], format="audio/wav")
+            st.download_button(
+                "Download WAV",
+                data=Path(last["wav_path"]).read_bytes(),
+                file_name=Path(last["wav_path"]).name,
+                mime="audio/wav",
+                use_container_width=True,
+                key="latest_dl"
+            )
 
     if demo:
         demos = {
-            "swh": "Habari! Karibu kwenye Ongea. Hii ni sauti ya Kiswahili yenye ubora wa juu.",
-            "amh": "ሰላም! ወደ ኦንጌአ እንኳን በደህና መጡ። ይህ የአማርኛ ድምፅ ሙከራ ነው።",
-            "som": "Salaan! Ku soo dhawow Ongea. Tani waa tijaabo cod Soomaali ah.",
-            "yor": "Báwo ni! Káàbọ̀ sí Ongea. Èyí jẹ́ àdánwò ohun Yorùbá.",
-            "sna": "Mhoro! Mauya ku Ongea. Iyi inyaya yekuedza mutauro weShona.",
-            "xho": "Molo! Wamkelekile ku Ongea. Le yisampuli yesiXhosa.",
-            "afr": "Hallo! Welkom by Ongea. Hierdie is ’n Afrikaans stemtoets.",
-            "lin": "Mbote! Boyei malamu na Ongea. Oyo ezali exemple ya mongongo ya Lingala.",
-            "kon": "Mbote! Wiza malembe na Ongea. Yai kele kiteso ya mongongo ya Kikongo.",
-            "luo": "Misawa! Wabiro e Ongea. Ma en teme mar Dholuo.",
-            "kik": "Wî mwega! Wîîkarîre Ongea. Îno nî kîgerio gîa Gikuyu.",
-            "mer": "Mûciî! Wîîkarîre Ongea. Îno nî kîgerio kîa Kîmerû.",
-            "kam": "Wîa! Wîîkarîre Ongea. Îno nî kîgerio kîa Kikamba.",
-            "guz": "Bwairire! Wîîkarîre Ongea. Eno nî kîgerio kîa Ekegusii.",
-            "luy": "Mulembe! Wîîkarîre Ongea. Eno nî kîgerio kîa Luluhya.",
-            "kln": "Chamgei! Wîîkarîre Ongea. Eno nî kîgerio kîa Kalenjin.",
-            "mas": "Supa! Wîîkarîre Ongea. Eno nî kîgerio kîa Maa.",
-            "dav": "Mwaka! Wîîkarîre Ongea. Eno nî kîgerio kîa Kidawida.",
+            "swh": "Habari! Karibu kwenye Ongea.",
+            "amh": "ሰላም! ወደ ኦንጌአ እንኳን በደህና መጡ።",
+            "som": "Salaan! Ku soo dhawow Ongea.",
+            "yor": "Báwo ni! Káàbọ̀ sí Ongea.",
         }
-        text = demos.get(lang_code, "Hello from Ongea!")
+        st.session_state.speak_text = demos.get(lang_code, "Hello from Ongea!")
+        st.rerun()
 
     if clear:
+        st.session_state.speak_text = ""
         st.rerun()
 
     if speak:
@@ -770,56 +866,79 @@ def page_speak(st):
             load_voice = get_voice_loader()
             model_id = voices[voice_name]
 
-            with st.spinner(f"Loading {voice_name}..."):
-                bundle = load_voice(model_id, lang_code)
+            overlay = show_crafting_overlay(st, "Crafting voice... (loading model)")
+            bundle = load_voice(model_id, lang_code)
+            hide_overlay(overlay)
 
-            with st.spinner("Generating speech (human pauses)..."):
-                audio, sr = synthesize_human(bundle, text)
-                audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
-
-                out_wav = OUTPUT_DIR / "app_outputs" / f"{lang_code}_speech.wav"
-                write_wav(out_wav, audio, sr)
-
-            st.success("Done!")
-            st.audio(str(out_wav), format="audio/wav")
-            st.download_button(
-                "Download WAV",
-                data=out_wav.read_bytes(),
-                file_name=f"ongea_{lang_code}.wav",
-                mime="audio/wav",
-                use_container_width=True
+            overlay = show_crafting_overlay(st, "Crafting voice... (generating speech)")
+            audio, sr = synthesize_human(bundle, st.session_state.speak_text)
+            audio = apply_tone(
+                audio, sr,
+                speed=st.session_state.speak_speed,
+                pitch_semitones=st.session_state.speak_pitch
             )
+            out_wav = OUTPUT_DIR / "app_outputs" / f"{lang_code}_speech_{len(st.session_state.history)+1:03d}.wav"
+            write_wav(out_wav, audio, sr)
+            hide_overlay(overlay)
+
+            item = {
+                "id": f"{lang_code}_{len(st.session_state.history)+1:03d}",
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "lang_code": lang_code,
+                "lang_name": lang_name,
+                "voice_name": voice_name,
+                "text": st.session_state.speak_text,
+                "wav_path": str(out_wav),
+                "sr": sr,
+            }
+            st.session_state.history.append(item)
+            st.session_state.latest_idx = len(st.session_state.history) - 1
+            st.rerun()
+
         except Exception as e:
-            st.error(
-                f"Could not load voice `{model_id}`.\n\n"
-                f"Ongea tried the per-language repo and the MMS monorepo fallback.\n\n"
-                f"Error: {e}"
-            )
+            hide_overlay(overlay) if "overlay" in locals() else None
+            st.error(f"Could not generate speech: {e}")
             st.exception(e)
 
-def page_batch(st):
-    lang_name = language_panel(st)
-    lang_code = LANGUAGES[lang_name]
-    voices = VOICE_LIBRARY_BY_LANG.get(lang_code, {})
-    if not voices:
-        voices = {f"Ongea {lang_name} (Meta MMS Base)": f"facebook/mms-tts-{lang_code}"}
 
-    st.markdown("<div class='glass'>", unsafe_allow_html=True)
+# ---------- BATCH / FINETUNE / ABOUT ----------
+
+def batch_tab(st, lang_name, lang_code):
+    voices = get_voices_for(lang_code, lang_name)
+
     st.subheader("🎬 Batch Studio")
-    lines = st.text_area("Lines (one sentence per line)", height=220)
+    lines = st.text_area(
+        "Lines (one sentence per line)",
+        height=140,
+        key="batch_lines_area",
+        value=st.session_state.batch_lines
+    )
+    st.session_state.batch_lines = lines
     voice_name = st.selectbox("Voice", list(voices.keys()), key="batch_voice")
-    speed = st.slider("Speed", 0.75, 1.50, 1.0, 0.05, key="batch_speed")
-    pitch = st.slider("Pitch (semitones)", -4.0, 4.0, 0.0, 0.5, key="batch_pitch")
-    go = st.button("Generate Batch", use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    tone_pop = st.popover("🎛️ Tone for Batch")
+    with tone_pop:
+        speed = st.slider("Speed", 0.75, 1.50, st.session_state.speak_speed, 0.05, key="batch_speed")
+        pitch = st.slider("Pitch", -4.0, 4.0, st.session_state.speak_pitch, 0.5, key="batch_pitch")
+
+    bA, bB = st.columns(2, gap="small")
+    go = bA.button("Generate Batch", use_container_width=True, key="btn_batch_go")
+    clear = bB.button("Clear Batch", use_container_width=True, key="btn_batch_clear")
+
+    if clear:
+        st.session_state.batch_lines = ""
+        st.rerun()
 
     if go:
         try:
             load_voice = get_voice_loader()
             model_id = voices[voice_name]
-            with st.spinner(f"Loading {voice_name}..."):
-                bundle = load_voice(model_id, lang_code)
 
+            overlay = show_crafting_overlay(st, "Crafting voice... (loading model)")
+            bundle = load_voice(model_id, lang_code)
+            hide_overlay(overlay)
+
+            overlay = show_crafting_overlay(st, "Crafting voice... (batch synthesis)")
             outs = []
             for i, ln in enumerate([l for l in lines.split("\n") if l.strip()]):
                 audio, sr = synthesize_human(bundle, ln)
@@ -827,96 +946,74 @@ def page_batch(st):
                 p = OUTPUT_DIR / "app_outputs" / f"{lang_code}_batch_{i+1:02d}.wav"
                 write_wav(p, audio, sr)
                 outs.append(p)
+            hide_overlay(overlay)
 
             st.success(f"Generated {len(outs)} clips.")
-            for p in outs:
+            for p in outs[:2]:
                 st.markdown(f"**{p.name}**")
                 st.audio(str(p), format="audio/wav")
-                st.download_button(
-                    f"Download {p.name}",
-                    data=p.read_bytes(),
-                    file_name=p.name,
-                    mime="audio/wav"
-                )
         except Exception as e:
             st.error(str(e))
             st.exception(e)
 
-def page_train(st):
-    lang_name = language_panel(st)
-    lang_code = LANGUAGES[lang_name]
-    st.markdown("<div class='glass'>", unsafe_allow_html=True)
+def finetune_tab(st, lang_code):
     st.subheader("🧪 Fine-tuning (Local)")
     st.code(f"python app.py --train --lang {lang_code}")
     st.write(f"Outputs go to: `{OUTPUT_DIR / lang_code}`")
+
+def about_tab(st):
+    st.subheader("About")
+    st.write(
+        "Ongea is a calm text-to-speech studio using Meta MMS + community voices.\n\n"
+        "• Multiple African languages + Kenya pack\n"
+        "• Robust MMS loader (monorepo fallback)\n"
+        "• Optional Coqui HF voices via `coqui:` prefix\n"
+        "• Human-like punctuation pauses\n"
+        "• One-page no-scroll main UI\n"
+        "• Session Library in the sidebar"
+    )
+
+
+def studio_screen(st):
+    # Floating Library toggle (always visible)
+    st.markdown("<div id='library-toggle-wrap'>", unsafe_allow_html=True)
+    if st.button("📚 Library", key="toggle_library"):
+        st.session_state.sidebar_open = not st.session_state.sidebar_open
+        st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-def page_about(st):
-    st.markdown("<div class='glass'>", unsafe_allow_html=True)
-    st.subheader("About Ongea v5.3")
-    st.write(
-        "Ongea is a Pan-African Text-to-Speech studio built on Meta MMS + community voices.\n\n"
-        "**Upgrades:**\n"
-        "• 9 Pan-African languages + Kenya pack\n"
-        "• Robust MMS loader with monorepo fallback\n"
-        "• Optional Coqui HF voices (XTTS/YourTTS) via `coqui:` prefix\n"
-        "• Human-like punctuation pauses\n"
-        "• Failsafe UI (no whitescreen)\n\n"
-        "No assets required — models download automatically."
+    if st.session_state.sidebar_open:
+        render_sidebar_library(st)
+
+    # Calm header (NO box, NO tagline)
+    st.markdown(
+        "<div style='font-size:2.6rem;font-weight:1000;color:#00E0B8;margin-top:0.2rem;'>Ongea</div>",
+        unsafe_allow_html=True
     )
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    lang_name, lang_code, voice_name, voices = studio_top_row(st)
+
+    tabs = st.tabs(["Speak", "Batch", "Fine-tune", "About"])
+    with tabs[0]:
+        speak_tab(st, lang_name, lang_code, voice_name, voices)
+    with tabs[1]:
+        batch_tab(st, lang_name, lang_code)
+    with tabs[2]:
+        finetune_tab(st, lang_code)
+    with tabs[3]:
+        about_tab(st)
+
 
 def run_app():
-    try:
-        import streamlit as st
-        st.set_page_config(page_title="Ongea — Pan-African TTS", layout="centered")
+    import streamlit as st
+    st.set_page_config(page_title="Ongea", layout="wide")
+    _init_state(st)
+    inject_theme(st, st.session_state.sidebar_open)
 
-        _init_state(st)
-
-        # ✅ Render visible UI FIRST (before theme)
-        st.markdown("## ✅ Ongea is loading...")
-        st.caption("If you see a dark/blank screen, refresh the page or try disabling JavaScript console.")
-
-        # Try to inject theme, but don't crash if it fails
-        try:
-            inject_theme(st)
-        except Exception as e:
-            st.warning(f"⚠️ Theme not applied (non-critical): {str(e)[:100]}")
-
-        # Try header, but ensure nav still works if it fails
-        try:
-            header_block(st)
-        except Exception as e:
-            st.warning(f"⚠️ Header error: {str(e)[:100]}")
-
-        try:
-            render_nav(st)
-        except Exception as e:
-            st.warning(f"⚠️ Navigation error: {str(e)[:100]}")
-
-        # Main page content with error handling
-        try:
-            page = st.session_state.page
-            if page == "Speak":
-                page_speak(st)
-            elif page == "Batch":
-                page_batch(st)
-            elif page == "Fine-tune":
-                page_train(st)
-            else:
-                page_about(st)
-        except Exception as e:
-            st.error(f"❌ Page rendering error: {str(e)}")
-            import traceback
-            st.text(traceback.format_exc())
-
-        st.caption("Ongea • Pan-African Text-to-Speech • Meta MMS + Community Voices")
-    
-    except Exception as e:
-        import streamlit as st
-        st.error("🔥 Critical app initialization error:")
-        import traceback
-        st.text(traceback.format_exc())
+    if st.session_state.mode == "welcome":
+        welcome_screen(st)
+    else:
+        studio_screen(st)
 
 
 # =========================
