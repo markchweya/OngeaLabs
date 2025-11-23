@@ -2,6 +2,8 @@
 """
 ONGEA v5.3 — Pan-African Text-to-Speech Studio (FAILSAFE BUILD)
 Languages: Swahili, Amharic, Somali, Yoruba, Shona, Xhosa, Afrikaans, Lingala, Kongo
++ Kenya pack: Luo, Agikuyu, Ameru, Akamba, Ekegusii, Luhya, Kalenjin, Maasai, Taita
+
 ONE FILE. No external assets.
 
 Run:
@@ -24,8 +26,9 @@ import re
 import json
 import argparse
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, List, Union
+from typing import Optional, Tuple, Dict, Any, List
 
 import numpy as np
 
@@ -42,7 +45,9 @@ EVAL_SPLIT = None
 DEFAULT_AUDIO_COL = "audio"
 DEFAULT_TEXT_COL = "text"
 
+# --- LANGUAGES ---
 LANGUAGES: Dict[str, str] = {
+    # Core Pan-African set
     "Swahili (Kiswahili) — KE/TZ/UG": "swh",
     "Amharic (አማርኛ) — ET": "amh",
     "Somali (Soomaaliga) — SO/ET/DJ": "som",
@@ -52,6 +57,17 @@ LANGUAGES: Dict[str, str] = {
     "Afrikaans — ZA/NA": "afr",
     "Lingala — CD/CG": "lin",
     "Kongo (Kikongo) — CD/CG/AO": "kon",
+
+    # Kenya pack (major languages)
+    "Luo (Dholuo) — KE": "luo",
+    "Gikuyu (Agĩkũyũ) — KE": "kik",
+    "Ameru (Kĩmĩrũ / Meru) — KE": "mer",
+    "Kamba (Kikamba) — KE": "kam",
+    "Ekegusii (Kisii) — KE": "guz",
+    "Luhya (Luluhya) — KE": "luy",
+    "Kalenjin — KE": "kln",
+    "Maasai (Maa) — KE/TZ": "mas",
+    "Taita (Kidawida / Dawida) — KE": "dav",
 }
 
 PROJECT_NAME = "ongea-v5-mms-tts-multi"
@@ -81,6 +97,9 @@ STRIP_PUNCT = False  # keep punctuation for prosody splitting
 # =========================
 
 VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
+    # -----------------------------
+    # Core languages (original)
+    # -----------------------------
     "swh": {
         "Ongea Swahili Male / Neutral (Meta Base)": "facebook/mms-tts-swh",
         "Ongea Swahili Female (Mozilla Lady)": "Benjamin-png/swahili-mms-tts-mozilla-lady-voice-finetuned",
@@ -88,11 +107,7 @@ VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
         "Ongea Swahili Narrator (OpenBible)": "bookbot/vits-base-sw-KE-OpenBible",
         "Ongea Swahili SALAMA (Prosody-rich)": "EYEDOL/SALAMA_TTS",
     },
-    # ✅ MMS Amharic is flaky on Windows/Py3.13 -> add backup that works without uroman
-    "amh": {
-        "Ongea Amharic (Meta MMS Base)": "facebook/mms-tts-amh",
-        "Ongea Amharic (SpeechT5 Backup)": "AddisuSeteye/speecht5_tts_amharic",
-    },
+    "amh": {"Ongea Amharic (Meta MMS Base)": "facebook/mms-tts-amh"},
     "som": {"Ongea Somali (Meta MMS Base)": "facebook/mms-tts-som"},
     "yor": {"Ongea Yoruba (Meta MMS Base)": "facebook/mms-tts-yor"},
     "sna": {"Ongea Shona (Meta MMS Base)": "facebook/mms-tts-sna"},
@@ -100,6 +115,25 @@ VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
     "afr": {"Ongea Afrikaans (Meta MMS Base)": "facebook/mms-tts-afr"},
     "lin": {"Ongea Lingala (Meta MMS Base)": "facebook/mms-tts-lin"},
     "kon": {"Ongea Kongo (Meta MMS Base)": "facebook/mms-tts-kon"},
+
+    # -----------------------------
+    # Kenya pack
+    # -----------------------------
+    "luo": {
+        # CLEAR-Global Luo voices (Coqui format; optional)
+        "Ongea Luo (CLEAR YourTTS, HF/Coqui)": "coqui:CLEAR-Global/YourTTS-Luo",
+        "Ongea Luo (CLEAR XTTS, HF/Coqui)": "coqui:CLEAR-Global/XTTS-Luo",
+        # Meta MMS if it exists in your env / monorepo
+        "Ongea Luo (Meta MMS Base)": "facebook/mms-tts-luo",
+    },
+    "kik": {"Ongea Gikuyu (Meta MMS Base)": "facebook/mms-tts-kik"},
+    "mer": {"Ongea Ameru/Meru (Meta MMS Base)": "facebook/mms-tts-mer"},
+    "kam": {"Ongea Kamba (Meta MMS Base)": "facebook/mms-tts-kam"},
+    "guz": {"Ongea Ekegusii/Kisii (Meta MMS Base)": "facebook/mms-tts-guz"},
+    "luy": {"Ongea Luhya (Meta MMS Base)": "facebook/mms-tts-luy"},
+    "kln": {"Ongea Kalenjin (Meta MMS Base)": "facebook/mms-tts-kln"},
+    "mas": {"Ongea Maasai (Meta MMS Base)": "facebook/mms-tts-mas"},
+    "dav": {"Ongea Taita/Dawida (Meta MMS Base)": "facebook/mms-tts-dav"},
 }
 
 
@@ -255,6 +289,16 @@ def launch_training(lang_code: str):
 # =========================
 
 BASE_MMS_REPO = "facebook/mms-tts"
+COQUI_PREFIX = "coqui:"
+
+@dataclass
+class VoiceBundle:
+    engine: str               # "hf_vits" or "coqui"
+    processor: Any = None     # HF processor for hf_vits
+    model: Any = None         # HF model OR Coqui TTS object
+    sr: int = TARGET_SR
+    model_id: str = ""
+    lang_code: str = ""
 
 def _get_model_classes():
     from transformers import AutoProcessor
@@ -265,66 +309,58 @@ def _get_model_classes():
         from transformers import VitsModel
         return AutoProcessor, VitsModel
 
-def _load_speecht5_bundle(model_id: str):
+def _encode_inputs(processor, text: str):
     """
-    SpeechT5 needs:
-      - SpeechT5Processor
-      - SpeechT5ForTextToSpeech
-      - Vocoder (HiFiGAN)
-      - A speaker embedding (xvector); we use CMU Arctic default.
-    """
-    import torch
-    from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
-    from datasets import load_dataset
-
-    processor = SpeechT5Processor.from_pretrained(model_id)
-    model = SpeechT5ForTextToSpeech.from_pretrained(model_id)
-    vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
-
-    # Default speaker embedding:
-    # (works fine for single-speaker fine-tunes too)
-    xvec_ds = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
-    spk = torch.tensor(xvec_ds[0]["xvector"]).unsqueeze(0)
-
-    model.to("cpu").eval()
-    vocoder.to("cpu").eval()
-
-    return {
-        "kind": "speecht5",
-        "processor": processor,
-        "model": model,
-        "vocoder": vocoder,
-        "speaker_embedding": spk,
-        "sampling_rate": 16000,
-    }
-
-def _safe_load_model(model_id: str, lang_code: Optional[str] = None):
-    """
-    Robust loader:
-      1) SpeechT5 special-case
-      2) try model_id directly
-      3) fallback to monorepo: facebook/mms-tts subfolder=models/<lang_code>
+    Safe encoding:
+      - try normal
+      - fallback normalize=False for weird scripts
+      - detect empty input_ids early
     """
     import torch
+    try:
+        inputs = processor(text=text, return_tensors="pt")
+    except TypeError:
+        inputs = processor(text=text, return_tensors="pt", normalize=False)
 
-    # 1) SpeechT5 special-case (backup)
-    if "speecht5_tts_amharic" in model_id.lower() or "speecht5" in model_id.lower():
-        return _load_speecht5_bundle(model_id)
+    ids = inputs.get("input_ids", None)
+    if ids is not None:
+        if isinstance(ids, torch.Tensor) and (ids.numel() == 0 or ids.shape[-1] == 0):
+            raise ValueError(
+                "Tokenizer produced empty input_ids for this text. "
+                "This can happen with invisible chars or unsupported script."
+            )
+    return inputs
 
-    # 2/3) VITS/MMS path
+def _maybe_unidecode(text: str) -> str:
+    try:
+        from unidecode import unidecode
+        return unidecode(text)
+    except Exception:
+        return text
+
+def _safe_load_hf_vits(model_id: str, lang_code: Optional[str] = None) -> VoiceBundle:
+    """
+    Robust HF VITS loader:
+      1) try model_id directly
+      2) fallback to monorepo: facebook/mms-tts subfolder=models/<lang_code>
+    """
+    import torch
     AutoProcessor, ModelClass = _get_model_classes()
     last_err = None
 
+    # 1) direct
     try:
         processor = AutoProcessor.from_pretrained(model_id)
         model = ModelClass.from_pretrained(model_id, low_cpu_mem_usage=False, device_map=None)
         if any(getattr(p, "is_meta", False) for p in model.parameters()):
             raise RuntimeError("Model loaded with meta tensors.")
         model.to("cpu"); model.eval()
-        return {"kind": "vits", "processor": processor, "model": model}
+        return VoiceBundle(engine="hf_vits", processor=processor, model=model, sr=getattr(processor, "sampling_rate", TARGET_SR),
+                           model_id=model_id, lang_code=lang_code or "")
     except Exception as e:
         last_err = e
 
+    # 2) monorepo fallback
     if lang_code:
         try:
             sub = f"models/{lang_code}"
@@ -333,11 +369,68 @@ def _safe_load_model(model_id: str, lang_code: Optional[str] = None):
             if any(getattr(p, "is_meta", False) for p in model.parameters()):
                 raise RuntimeError("Model loaded with meta tensors.")
             model.to("cpu"); model.eval()
-            return {"kind": "vits", "processor": processor, "model": model}
+            return VoiceBundle(engine="hf_vits", processor=processor, model=model, sr=getattr(processor, "sampling_rate", TARGET_SR),
+                               model_id=model_id, lang_code=lang_code)
         except Exception as e:
             last_err = e
 
     raise last_err
+
+def _safe_load_coqui_hf(model_id: str) -> VoiceBundle:
+    """
+    Load custom Coqui (XTTS/YourTTS) checkpoints from HF repos.
+    model_id comes in as 'coqui:<repo_id>'.
+    """
+    real_id = model_id[len(COQUI_PREFIX):].strip()
+    try:
+        from huggingface_hub import snapshot_download
+        from TTS.api import TTS as CoquiTTS
+    except Exception as e:
+        raise RuntimeError(
+            "Coqui loader requested, but Coqui TTS or huggingface_hub isn't installed. "
+            "Install with: pip install TTS huggingface_hub"
+        ) from e
+
+    local_dir = snapshot_download(repo_id=real_id)
+    local_dir = Path(local_dir)
+
+    # find config
+    config_candidates = list(local_dir.rglob("config.json")) + list(local_dir.rglob("*config*.json"))
+    if not config_candidates:
+        raise RuntimeError(f"No Coqui config.json found in HF repo {real_id}.")
+    config_path = str(config_candidates[0])
+
+    # find checkpoint
+    ckpt_candidates = []
+    for ext in ("*.pth", "*.pt", "*.bin", "*.safetensors"):
+        ckpt_candidates += list(local_dir.rglob(ext))
+    ckpt_candidates = [p for p in ckpt_candidates if p.is_file()]
+
+    if not ckpt_candidates:
+        raise RuntimeError(f"No Coqui checkpoint (*.pth/*.pt/*.bin/*.safetensors) found in HF repo {real_id}.")
+    model_path = str(ckpt_candidates[0])
+
+    # Load custom
+    tts = CoquiTTS(model_path=model_path, config_path=config_path, progress_bar=False, gpu=False)
+
+    # sample rate if present
+    out_sr = TARGET_SR
+    try:
+        out_sr = int(getattr(tts.synthesizer, "output_sample_rate", TARGET_SR))
+    except Exception:
+        pass
+
+    return VoiceBundle(engine="coqui", processor=None, model=tts, sr=out_sr, model_id=model_id, lang_code="")
+
+def _safe_load_model(model_id: str, lang_code: Optional[str] = None) -> VoiceBundle:
+    """
+    Unified loader:
+      - if "coqui:" prefix => Coqui HF custom loader
+      - else => HF VITS/MMS loader
+    """
+    if model_id.startswith(COQUI_PREFIX):
+        return _safe_load_coqui_hf(model_id)
+    return _safe_load_hf_vits(model_id, lang_code=lang_code)
 
 def _to_1d_float32(audio) -> np.ndarray:
     try:
@@ -352,70 +445,36 @@ def _to_1d_float32(audio) -> np.ndarray:
         audio = audio.reshape(-1)
     return audio
 
-def _encode_inputs_vits(processor, text: str):
+def synthesize_raw(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
     """
-    Encode for VITS/MMS. If tokenizer yields empty ids, raise clear error.
+    Raw synthesis for either HF VITS or Coqui.
     """
+    import numpy as np
     text = clean_text(text)
     if not text:
         raise ValueError("Empty text.")
-    inputs = processor(text=text, return_tensors="pt")
-    ids = inputs.get("input_ids", None)
-    if ids is None or ids.numel() == 0 or ids.shape[-1] == 0:
-        raise ValueError(
-            "Tokenizer produced empty input_ids for this text. "
-            "This is a known MMS Amharic issue on some Windows/Python setups. "
-            "Try the SpeechT5 Amharic voice."
-        )
-    return inputs
 
-def synthesize_raw(bundle: Dict[str, Any], text: str, *, model_id: str = "", lang_code: str = "") -> Tuple[np.ndarray, int]:
-    """
-    Raw synthesis for both kinds:
-      - kind=vits (MMS/VITS)
-      - kind=speecht5 (backup)
-    """
-    import torch
-
-    kind = bundle.get("kind", "vits")
-
-    if kind == "speecht5":
-        processor = bundle["processor"]
-        model = bundle["model"]
-        vocoder = bundle["vocoder"]
-        spk = bundle["speaker_embedding"]
-
-        text = clean_text(text)
-        if not text:
-            raise ValueError("Empty text.")
-
-        inputs = processor(text=text, return_tensors="pt")
-        input_ids = inputs["input_ids"]
-
-        with torch.no_grad():
-            speech = model.generate_speech(
-                input_ids=input_ids,
-                speaker_embeddings=spk,
-                vocoder=vocoder
-            )
-
-        audio = _to_1d_float32(speech)
-        sr = int(bundle.get("sampling_rate", TARGET_SR))
+    if bundle.engine == "coqui":
+        # Coqui expects native script; if it fails, try unidecode fallback.
+        try:
+            wave = bundle.model.tts(text)
+        except Exception:
+            wave = bundle.model.tts(_maybe_unidecode(text))
+        audio = _to_1d_float32(wave)
+        sr = int(bundle.sr or TARGET_SR)
         if audio.size == 0:
-            raise ValueError("Model returned empty audio.")
+            raise ValueError("Coqui model returned empty audio.")
         m = float(np.max(np.abs(audio)))
         if m > 1.0:
             audio = audio / m
         return np.clip(audio, -1.0, 1.0), sr
 
-    # VITS/MMS
-    processor = bundle["processor"]
-    model = bundle["model"]
-
-    inputs = _encode_inputs_vits(processor, text)
+    # HF VITS path
+    processor, model = bundle.processor, bundle.model
+    inputs = _encode_inputs(processor, text)
+    import torch
     with torch.no_grad():
         out = model(**inputs)
-
     if isinstance(out, dict) and "waveform" in out:
         wave = out["waveform"]
     else:
@@ -443,17 +502,17 @@ def split_by_punctuation(text: str) -> List[Tuple[str, str]]:
             out.append((c, punct))
     return out
 
-def synthesize_human(bundle: Dict[str, Any], text: str, *, model_id: str = "", lang_code: str = "") -> Tuple[np.ndarray, int]:
+def synthesize_human(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
     chunks = split_by_punctuation(text)
     if not chunks:
         raise ValueError("Empty text.")
 
     audios = []
-    sr_final = TARGET_SR
+    sr_final = bundle.sr or TARGET_SR
     pause = {",":0.18, ";":0.22, ":":0.22, ".":0.38, "!":0.42, "?":0.42, "…":0.55}
 
     for chunk_text, punct in chunks:
-        a, sr = synthesize_raw(bundle, chunk_text, model_id=model_id, lang_code=lang_code)
+        a, sr = synthesize_raw(bundle, chunk_text)
         sr_final = sr_final or sr
         audios.append(a)
         dur = pause.get(punct, 0.0)
@@ -691,6 +750,15 @@ def page_speak(st):
             "afr": "Hallo! Welkom by Ongea. Hierdie is ’n Afrikaans stemtoets.",
             "lin": "Mbote! Boyei malamu na Ongea. Oyo ezali exemple ya mongongo ya Lingala.",
             "kon": "Mbote! Wiza malembe na Ongea. Yai kele kiteso ya mongongo ya Kikongo.",
+            "luo": "Misawa! Wabiro e Ongea. Ma en teme mar Dholuo.",
+            "kik": "Wî mwega! Wîîkarîre Ongea. Îno nî kîgerio gîa Gikuyu.",
+            "mer": "Mûciî! Wîîkarîre Ongea. Îno nî kîgerio kîa Kîmerû.",
+            "kam": "Wîa! Wîîkarîre Ongea. Îno nî kîgerio kîa Kikamba.",
+            "guz": "Bwairire! Wîîkarîre Ongea. Eno nî kîgerio kîa Ekegusii.",
+            "luy": "Mulembe! Wîîkarîre Ongea. Eno nî kîgerio kîa Luluhya.",
+            "kln": "Chamgei! Wîîkarîre Ongea. Eno nî kîgerio kîa Kalenjin.",
+            "mas": "Supa! Wîîkarîre Ongea. Eno nî kîgerio kîa Maa.",
+            "dav": "Mwaka! Wîîkarîre Ongea. Eno nî kîgerio kîa Kidawida.",
         }
         text = demos.get(lang_code, "Hello from Ongea!")
 
@@ -705,18 +773,8 @@ def page_speak(st):
             with st.spinner(f"Loading {voice_name}..."):
                 bundle = load_voice(model_id, lang_code)
 
-            # ✅ If Amharic MMS tokenization fails, auto-fallback to SpeechT5 backup
-            if lang_code == "amh" and bundle.get("kind") == "vits":
-                try:
-                    _ = _encode_inputs_vits(bundle["processor"], text)
-                except Exception:
-                    st.warning("Amharic MMS tokenizer failed here. Switching to SpeechT5 backup voice...")
-                    backup_id = voices.get("Ongea Amharic (SpeechT5 Backup)")
-                    bundle = load_voice(backup_id, lang_code)
-                    model_id = backup_id
-
             with st.spinner("Generating speech (human pauses)..."):
-                audio, sr = synthesize_human(bundle, text, model_id=model_id, lang_code=lang_code)
+                audio, sr = synthesize_human(bundle, text)
                 audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
 
                 out_wav = OUTPUT_DIR / "app_outputs" / f"{lang_code}_speech.wav"
@@ -762,20 +820,9 @@ def page_batch(st):
             with st.spinner(f"Loading {voice_name}..."):
                 bundle = load_voice(model_id, lang_code)
 
-            # ✅ Same Amharic fallback in batch
-            if lang_code == "amh" and bundle.get("kind") == "vits":
-                try:
-                    some_text = next((l for l in lines.split("\n") if l.strip()), "")
-                    _ = _encode_inputs_vits(bundle["processor"], some_text)
-                except Exception:
-                    st.warning("Amharic MMS tokenizer failed. Switching to SpeechT5 backup voice...")
-                    backup_id = voices.get("Ongea Amharic (SpeechT5 Backup)")
-                    bundle = load_voice(backup_id, lang_code)
-                    model_id = backup_id
-
             outs = []
             for i, ln in enumerate([l for l in lines.split("\n") if l.strip()]):
-                audio, sr = synthesize_human(bundle, ln, model_id=model_id, lang_code=lang_code)
+                audio, sr = synthesize_human(bundle, ln)
                 audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
                 p = OUTPUT_DIR / "app_outputs" / f"{lang_code}_batch_{i+1:02d}.wav"
                 write_wav(p, audio, sr)
@@ -810,10 +857,10 @@ def page_about(st):
     st.write(
         "Ongea is a Pan-African Text-to-Speech studio built on Meta MMS + community voices.\n\n"
         "**Upgrades:**\n"
-        "• 9 African languages\n"
+        "• 9 Pan-African languages + Kenya pack\n"
         "• Robust MMS loader with monorepo fallback\n"
+        "• Optional Coqui HF voices (XTTS/YourTTS) via `coqui:` prefix\n"
         "• Human-like punctuation pauses\n"
-        "• SpeechT5 Amharic backup for Windows MMS tokenizer issues\n"
         "• Failsafe UI (no whitescreen)\n\n"
         "No assets required — models download automatically."
     )
@@ -864,7 +911,7 @@ def run_app():
             st.text(traceback.format_exc())
 
         st.caption("Ongea • Pan-African Text-to-Speech • Meta MMS + Community Voices")
-
+    
     except Exception as e:
         import streamlit as st
         st.error("🔥 Critical app initialization error:")
