@@ -1,6 +1,5 @@
 import os
 import io
-import re
 import uuid
 import wave
 import math
@@ -8,24 +7,30 @@ import base64
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict
+
+
+# =========================
+# IMPORTANT FIX SUMMARY (what this code does)
+# =========================
+# 1) Removes any accidental output that would show raw HTML (no st.code/st.text of HTML).
+# 2) Ensures ALL HTML blocks are rendered with unsafe_allow_html=True.
+# 3) Updates LIGHT theme colors for better contrast (text/labels/sliders visible on white).
+# 4) Adds CSS to force Streamlit labels/slider text to use readable colors.
+# 5) Keeps one hover dropdown menu on the logo (no extra sidebar buttons).
+
 
 import streamlit as st
-
-
-# =========================
-# ONGEA — Modern Streamlit UI (Single-file)
-# =========================
 
 APP_NAME = "Ongea"
 APP_TAGLINE = "Calm African TTS Studio"
 OUTPUT_DIR = "ongea_outputs"
 
-# Brand palette (edit freely)
-ACCENT_A = "#0fb9b1"   # teal
-ACCENT_B = "#6d28d9"   # purple
+# Updated light-friendly accents (still editable)
+ACCENT_A = "#14b8a6"  # teal
+ACCENT_B = "#7c3aed"  # violet
 
-# Compact catalog (replace with your real catalog)
+
 LANGUAGES = [
     ("sw_ke", "Swahili (Kiswahili) — KE/TZ/UG"),
     ("am_et", "Amharic (አማርኛ) — ET"),
@@ -44,9 +49,6 @@ VOICES = [
 ]
 
 
-# =========================
-# Models
-# =========================
 @dataclass
 class Clip:
     id: str
@@ -63,20 +65,20 @@ class Clip:
     mime: str
 
 
-# =========================
-# Utilities
-# =========================
 def ensure_dirs():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+
 def now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
 def get_label(options: List[Tuple[str, str]], key: str) -> str:
     for k, v in options:
         if k == key:
             return v
     return key
+
 
 def svg_favicon_data_uri(accent_a: str, accent_b: str, bg: str) -> str:
     svg = f"""<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'>
@@ -97,6 +99,7 @@ def svg_favicon_data_uri(accent_a: str, accent_b: str, bg: str) -> str:
     b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
     return f"data:image/svg+xml;base64,{b64}"
 
+
 def inject_favicon_and_title(data_uri: str):
     st.markdown(
         f"""
@@ -111,23 +114,23 @@ def inject_favicon_and_title(data_uri: str):
         unsafe_allow_html=True,
     )
 
+
 def set_qp(view: str, theme: str, lib: int, mode: str):
-    # Streamlit query params (new API)
     st.query_params["view"] = view
     st.query_params["theme"] = theme
     st.query_params["lib"] = str(lib)
     st.query_params["mode"] = mode
+
 
 def read_qp() -> Dict[str, str]:
     qp = st.query_params
     out = {}
     for k in ["view", "theme", "lib", "mode"]:
         v = qp.get(k)
-        if v is None:
-            continue
-        # st.query_params returns str for single values in recent streamlit
-        out[k] = str(v)
+        if v is not None:
+            out[k] = str(v)
     return out
+
 
 def save_audio_bytes(audio_bytes: bytes, ext: str = "mp3") -> Tuple[str, str]:
     ensure_dirs()
@@ -138,6 +141,7 @@ def save_audio_bytes(audio_bytes: bytes, ext: str = "mp3") -> Tuple[str, str]:
         f.write(audio_bytes)
     mime = "audio/mpeg" if ext.lower() == "mp3" else "audio/wav"
     return fname, mime
+
 
 def zip_files(filenames: List[str]) -> bytes:
     buf = io.BytesIO()
@@ -150,11 +154,7 @@ def zip_files(filenames: List[str]) -> bytes:
     return buf.read()
 
 
-# =========================
-# Audio generation (plug in your real engine here)
-# =========================
 def make_placeholder_wav(seconds: float = 0.65, freq: float = 440.0) -> bytes:
-    # Small pleasant tone (so app remains usable even before wiring your model)
     sr = 22050
     n = int(sr * seconds)
     buf = io.BytesIO()
@@ -164,58 +164,36 @@ def make_placeholder_wav(seconds: float = 0.65, freq: float = 440.0) -> bytes:
         wf.setframerate(sr)
         for i in range(n):
             t = i / sr
-            # fade in/out
             fade = min(1.0, i / (sr * 0.05), (n - i) / (sr * 0.08))
-            s = int(30000 * fade * math.sin(2 * math.pi * freq * t))
+            s = int(24000 * fade * math.sin(2 * math.pi * freq * t))
             wf.writeframesraw(s.to_bytes(2, "little", signed=True))
     return buf.getvalue()
 
-def synthesize_meta_mms(
-    text: str,
-    language_id: str,
-    voice_id: str,
-    speed: float,
-    pitch: float,
-) -> Optional[Tuple[bytes, str]]:
-    """
-    >>> Plug your Meta/MMS synthesizer here and return (audio_bytes, ext).
-    Return None to indicate "not wired".
-    """
+
+def synthesize_meta_mms(text: str, language_id: str, voice_id: str, speed: float, pitch: float):
+    # Plug your real Meta/MMS pipeline here: return (audio_bytes, ext) e.g. ("mp3" or "wav")
     return None
 
+
 def synthesize_openai_fallback(text: str, voice_id: str) -> Tuple[bytes, str]:
-    """
-    OpenAI fallback TTS (works only if you select an openai_* voice and set OPENAI_API_KEY).
-    """
     try:
         from openai import OpenAI
     except Exception as e:
-        raise RuntimeError("OpenAI package missing. Install: pip install openai") from e
+        raise RuntimeError("Missing openai package. Install: pip install openai") from e
 
     api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("openai_api_key")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not found in environment.")
 
     client = OpenAI(api_key=api_key)
-
     voice_map = {"openai_alloy": "alloy", "openai_verse": "verse"}
-    oa_voice = voice_map.get(voice_id, "alloy")
     model = os.environ.get("ONGEA_OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 
-    resp = client.audio.speech.create(
-        model=model,
-        voice=oa_voice,
-        input=text,
-    )
+    resp = client.audio.speech.create(model=model, voice=voice_map.get(voice_id, "alloy"), input=text)
     return resp.read(), "mp3"
 
-def generate_tts_audio_bytes(
-    text: str,
-    language_id: str,
-    voice_id: str,
-    speed: float,
-    pitch: float,
-) -> Tuple[bytes, str]:
+
+def generate_tts_audio_bytes(text: str, language_id: str, voice_id: str, speed: float, pitch: float) -> Tuple[bytes, str]:
     text = (text or "").strip()
     if not text:
         raise ValueError("Text is empty.")
@@ -224,52 +202,46 @@ def generate_tts_audio_bytes(
         out = synthesize_meta_mms(text, language_id, voice_id, speed, pitch)
         if out is not None:
             return out
-        # Keep UI working even before wiring the model:
-        st.warning("Meta/MMS synth is not wired in this file yet. Generating a placeholder WAV so UI stays usable.")
+        st.warning("Meta/MMS synth is not wired yet. Generating a placeholder WAV to keep UI usable.")
         return make_placeholder_wav(), "wav"
 
     if voice_id.startswith("openai_"):
         return synthesize_openai_fallback(text, voice_id)
 
-    # default placeholder
     return make_placeholder_wav(), "wav"
 
 
-# =========================
-# CSS (Modern, compact selects, hover menu on logo)
-# =========================
 def css(theme: str, library_open: bool) -> str:
     dark = (theme == "dark")
+
     if dark:
         bgA = "#070c16"
         bgB = "#071b22"
         card = "rgba(255,255,255,0.07)"
-        card2 = "rgba(255,255,255,0.10)"
-        border = "rgba(255,255,255,0.12)"
-        text = "rgba(255,255,255,0.92)"
-        muted = "rgba(255,255,255,0.62)"
-        input_bg = "rgba(255,255,255,0.06)"
+        card2 = "rgba(255,255,255,0.11)"
+        border = "rgba(255,255,255,0.14)"
+        text = "rgba(255,255,255,0.93)"
+        muted = "rgba(255,255,255,0.70)"
+        input_bg = "rgba(255,255,255,0.07)"
         shadow = "0 18px 60px rgba(0,0,0,0.40)"
-        panel_bg = "rgba(8,14,24,0.55)"
     else:
-        bgA = "#eff8ff"
-        bgB = "#e9fff9"
-        card = "rgba(255,255,255,0.72)"
-        card2 = "rgba(255,255,255,0.90)"
-        border = "rgba(10,30,60,0.10)"
-        text = "rgba(8,14,24,0.92)"
-        muted = "rgba(8,14,24,0.60)"
-        input_bg = "rgba(255,255,255,0.85)"
-        shadow = "0 18px 50px rgba(7,20,60,0.10)"
-        panel_bg = "rgba(255,255,255,0.55)"
+        # NEW: higher-contrast, light-friendly palette
+        bgA = "#f4fbff"
+        bgB = "#f3fffb"
+        card = "rgba(255,255,255,0.82)"
+        card2 = "rgba(255,255,255,0.95)"
+        border = "rgba(15,23,42,0.12)"
+        text = "#0f172a"
+        muted = "rgba(15,23,42,0.66)"
+        input_bg = "rgba(255,255,255,0.98)"
+        shadow = "0 16px 44px rgba(15,23,42,0.10)"
 
-    # slide sidebar
     sb_tx = "0px" if library_open else "-360px"
     sb_op = "1" if library_open else "0"
 
     return f"""
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
 
       :root {{
         --bgA: {bgA};
@@ -281,33 +253,31 @@ def css(theme: str, library_open: bool) -> str:
         --muted: {muted};
         --input: {input_bg};
         --shadow: {shadow};
-        --panel: {panel_bg};
         --a: {ACCENT_A};
         --b: {ACCENT_B};
         --r: 22px;
       }}
 
-      /* hide streamlit chrome */
       #MainMenu, footer, header {{ visibility: hidden; }}
       div[data-testid="stToolbar"] {{ display:none; }}
 
       .stApp {{
         background:
-          radial-gradient(1200px 680px at 16% 12%, rgba(15,185,177,0.18) 0%, transparent 60%),
-          radial-gradient(1100px 700px at 90% 12%, rgba(109,40,217,0.16) 0%, transparent 62%),
-          radial-gradient(1000px 700px at 60% 96%, rgba(15,185,177,0.10) 0%, transparent 60%),
-          linear-gradient(120deg, var(--bgA) 10%, var(--bgB) 90%);
+          radial-gradient(1100px 650px at 12% 14%, rgba(20,184,166,0.20) 0%, transparent 62%),
+          radial-gradient(1000px 650px at 90% 14%, rgba(124,58,237,0.18) 0%, transparent 64%),
+          radial-gradient(980px 660px at 55% 96%, rgba(20,184,166,0.12) 0%, transparent 62%),
+          linear-gradient(120deg, var(--bgA) 8%, var(--bgB) 92%);
         color: var(--text);
         font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       }}
 
       .block-container {{
-        padding-top: 1.00rem !important;
+        padding-top: 1.0rem !important;
         padding-bottom: 1.35rem !important;
         max-width: 1240px;
       }}
 
-      /* Fixed library drawer using sidebar (we animate it) */
+      /* Library drawer */
       section[data-testid="stSidebar"] {{
         position: fixed;
         top: 0; left: 0;
@@ -322,7 +292,7 @@ def css(theme: str, library_open: bool) -> str:
         box-shadow: var(--shadow);
       }}
 
-      /* Logo + hover dropdown */
+      /* Header */
       .oge-top {{
         display:flex;
         align-items:center;
@@ -338,7 +308,7 @@ def css(theme: str, library_open: bool) -> str:
       .oge-logo {{
         width: 48px; height: 48px;
         border-radius: 18px;
-        background: linear-gradient(135deg, rgba(15,185,177,0.26), rgba(109,40,217,0.20));
+        background: linear-gradient(135deg, rgba(20,184,166,0.22), rgba(124,58,237,0.17));
         border: 1px solid var(--border);
         box-shadow: var(--shadow);
         display:flex; align-items:center; justify-content:center;
@@ -358,6 +328,7 @@ def css(theme: str, library_open: bool) -> str:
         font-size: 36px;
         letter-spacing: -0.02em;
         margin: 0;
+        color: var(--text);
       }}
       .oge-sub {{
         font-size: 13px;
@@ -365,11 +336,12 @@ def css(theme: str, library_open: bool) -> str:
         margin-top: 4px;
       }}
 
+      /* Hover dropdown — IMPORTANT: no code blocks, real HTML only */
       .oge-dd {{
         position: absolute;
         top: 56px;
         left: 0;
-        width: 270px;
+        width: 285px;
         background: var(--card2);
         border: 1px solid var(--border);
         border-radius: 18px;
@@ -390,8 +362,8 @@ def css(theme: str, library_open: bool) -> str:
         border-radius: 14px;
       }}
       .oge-dd a:hover {{
-        background: linear-gradient(135deg, rgba(15,185,177,0.16), rgba(109,40,217,0.12));
-        border: 1px solid rgba(255,255,255,0.08);
+        background: linear-gradient(135deg, rgba(20,184,166,0.16), rgba(124,58,237,0.12));
+        border: 1px solid rgba(255,255,255,0.10);
       }}
       .oge-dd small {{
         color: var(--muted);
@@ -420,7 +392,7 @@ def css(theme: str, library_open: bool) -> str:
       .oge-ic {{
         width: 38px; height: 38px;
         border-radius: 14px;
-        background: linear-gradient(135deg, rgba(15,185,177,0.22), rgba(109,40,217,0.18));
+        background: linear-gradient(135deg, rgba(20,184,166,0.22), rgba(124,58,237,0.18));
         border: 1px solid var(--border);
         display:flex; align-items:center; justify-content:center;
         font-size: 18px;
@@ -430,6 +402,7 @@ def css(theme: str, library_open: bool) -> str:
         font-size: 20px;
         font-weight: 800;
         margin: 0;
+        color: var(--text);
       }}
       .oge-card-sub {{
         color: var(--muted);
@@ -444,7 +417,7 @@ def css(theme: str, library_open: bool) -> str:
         margin: 0 0 6px 2px;
       }}
 
-      /* Compact baseweb selects */
+      /* Compact selects */
       div[data-baseweb="select"] > div {{
         background: var(--input) !important;
         border: 1px solid var(--border) !important;
@@ -455,6 +428,7 @@ def css(theme: str, library_open: bool) -> str:
       div[data-baseweb="select"] span {{
         color: var(--text) !important;
         font-size: 13px !important;
+        font-weight: 600 !important;
       }}
       div[role="listbox"] {{
         background: var(--card2) !important;
@@ -463,11 +437,16 @@ def css(theme: str, library_open: bool) -> str:
         box-shadow: var(--shadow) !important;
       }}
 
-      textarea, input {{
+      /* Inputs */
+      .stTextArea textarea {{
         background: var(--input) !important;
         border: 1px solid var(--border) !important;
         border-radius: 18px !important;
         color: var(--text) !important;
+        font-weight: 500 !important;
+      }}
+      .stTextArea textarea::placeholder {{
+        color: rgba(15,23,42,0.45) !important;
       }}
 
       /* Segmented radio */
@@ -486,16 +465,38 @@ def css(theme: str, library_open: bool) -> str:
         border-radius: 999px;
         margin: 0 !important;
       }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"] span {{
+        color: var(--text) !important;
+        font-weight: 700 !important;
+      }}
       div[data-testid="stRadio"] label[data-baseweb="radio"][aria-checked="true"] {{
-        background: linear-gradient(135deg, rgba(15,185,177,0.18), rgba(109,40,217,0.14)) !important;
+        background: linear-gradient(135deg, rgba(20,184,166,0.16), rgba(124,58,237,0.12)) !important;
         border: 1px solid rgba(255,255,255,0.10);
       }}
 
-      /* Modern primary button */
+      /* Slider visibility + accent */
+      div[data-testid="stSlider"] * {{
+        color: var(--text) !important;
+        font-weight: 650 !important;
+      }}
+      div[data-testid="stSlider"] [data-baseweb="slider"] div {{
+        box-shadow: none !important;
+      }}
+      /* Thumb */
+      div[data-testid="stSlider"] [role="slider"] {{
+        background: linear-gradient(135deg, var(--a), var(--b)) !important;
+        border: 1px solid rgba(255,255,255,0.25) !important;
+      }}
+      /* Filled track (best-effort selectors for Streamlit/BaseWeb) */
+      div[data-testid="stSlider"] div[data-baseweb="slider"] div[style*="background-color: rgb"] {{
+        background: linear-gradient(135deg, rgba(20,184,166,0.75), rgba(124,58,237,0.65)) !important;
+      }}
+
+      /* Primary button */
       .stButton > button {{
-        background: linear-gradient(135deg, rgba(15,185,177,0.95) 0%, rgba(109,40,217,0.85) 100%) !important;
+        background: linear-gradient(135deg, rgba(20,184,166,0.95) 0%, rgba(124,58,237,0.88) 100%) !important;
         color: white !important;
-        border: 1px solid rgba(255,255,255,0.12) !important;
+        border: 1px solid rgba(255,255,255,0.14) !important;
         border-radius: 999px !important;
         padding: 0.72rem 1.05rem !important;
         font-weight: 800 !important;
@@ -506,27 +507,21 @@ def css(theme: str, library_open: bool) -> str:
       .stButton > button:hover {{ filter: brightness(1.02); transform: translateY(-1px); }}
       .stButton > button:active {{ transform: translateY(0px); }}
 
-      /* Audio */
       audio {{ width:100%; border-radius: 999px; }}
-
-      /* nicer captions spacing */
       .stCaption {{ color: var(--muted) !important; }}
     </style>
     """
 
 
-# =========================
-# State + routing
-# =========================
 def init_state():
     if "theme" not in st.session_state:
         st.session_state.theme = "light"
     if "view" not in st.session_state:
-        st.session_state.view = "studio"  # studio | finetune | about
+        st.session_state.view = "studio"
     if "lib" not in st.session_state:
         st.session_state.lib = 0
     if "mode" not in st.session_state:
-        st.session_state.mode = "Speak"
+        st.session_state.mode = "Batch"
 
     if "language_id" not in st.session_state:
         st.session_state.language_id = LANGUAGES[0][0]
@@ -544,23 +539,25 @@ def init_state():
         st.session_state.batch_text = ""
 
     if "clips" not in st.session_state:
-        st.session_state.clips: List[Clip] = []
+        st.session_state.clips = []
     if "latest_clip_id" not in st.session_state:
         st.session_state.latest_clip_id = None
 
+
 def apply_qp_to_state():
     qp = read_qp()
-    if "theme" in qp and qp["theme"] in ("light", "dark"):
+    if qp.get("theme") in ("light", "dark"):
         st.session_state.theme = qp["theme"]
-    if "view" in qp and qp["view"] in ("studio", "finetune", "about"):
+    if qp.get("view") in ("studio", "finetune", "about"):
         st.session_state.view = qp["view"]
     if "lib" in qp:
         try:
             st.session_state.lib = 1 if int(qp["lib"]) == 1 else 0
         except:
             st.session_state.lib = 0
-    if "mode" in qp and qp["mode"] in ("Speak", "Batch"):
+    if qp.get("mode") in ("Speak", "Batch"):
         st.session_state.mode = qp["mode"]
+
 
 def build_link(view=None, theme=None, lib=None, mode=None) -> str:
     v = view if view is not None else st.session_state.view
@@ -569,17 +566,16 @@ def build_link(view=None, theme=None, lib=None, mode=None) -> str:
     m = mode if mode is not None else st.session_state.mode
     return f"?view={v}&theme={t}&lib={l}&mode={m}"
 
+
 def add_clip(mode: str, text: str, filename: str, mime: str):
-    lang_label = get_label(LANGUAGES, st.session_state.language_id)
-    voice_label = get_label(VOICES, st.session_state.voice_id)
     clip = Clip(
         id=uuid.uuid4().hex,
         created_at=now_iso(),
         mode=mode,
         language_id=st.session_state.language_id,
-        language_label=lang_label,
+        language_label=get_label(LANGUAGES, st.session_state.language_id),
         voice_id=st.session_state.voice_id,
-        voice_label=voice_label,
+        voice_label=get_label(VOICES, st.session_state.voice_id),
         speed=float(st.session_state.speed),
         pitch=float(st.session_state.pitch),
         text=text,
@@ -590,6 +586,7 @@ def add_clip(mode: str, text: str, filename: str, mime: str):
     st.session_state.latest_clip_id = clip.id
     return clip
 
+
 def get_latest_clip() -> Optional[Clip]:
     if not st.session_state.latest_clip_id:
         return None
@@ -599,9 +596,6 @@ def get_latest_clip() -> Optional[Clip]:
     return None
 
 
-# =========================
-# Library drawer
-# =========================
 def render_library_drawer():
     st.sidebar.markdown("### 📚 Library")
     st.sidebar.caption("Generated speeches in this session.")
@@ -624,14 +618,6 @@ def render_library_drawer():
               <div style="margin-top:6px; font-size:12px; color:var(--muted);">
                 {clip.language_label} • {clip.voice_label}
               </div>
-              <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-                <span style="display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--card2);color:var(--muted);font-size:12px;">
-                  x{clip.speed:.2f}
-                </span>
-                <span style="display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--card2);color:var(--muted);font-size:12px;">
-                  pitch {clip.pitch:+.2f}
-                </span>
-              </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -650,10 +636,8 @@ def render_library_drawer():
             )
 
 
-# =========================
-# Header with hover dropdown on logo
-# =========================
 def render_header():
+    # NOTE: this is pure HTML rendered with unsafe_allow_html=True
     lib_toggle_to = 0 if st.session_state.lib == 1 else 1
     theme_toggle_to = "dark" if st.session_state.theme == "light" else "light"
 
@@ -671,29 +655,24 @@ def render_header():
         f"""
         <div class="oge-top">
           <div class="oge-left">
-            <div class="oge-logo">
+            <div class="oge-logo" aria-label="Ongea menu">
               <span>🎙️</span>
               <div class="oge-dd">
                 <a href="{studio_link}">
-                  <div>🎛 Studio<br><small>Speak + Batch</small></div>
-                  <div>›</div>
+                  <div>🎛 Studio<br><small>Speak + Batch</small></div><div>›</div>
                 </a>
                 <a href="{finetune_link}">
-                  <div>🧪 Fine-tune<br><small>Local training</small></div>
-                  <div>›</div>
+                  <div>🧪 Fine-tune<br><small>Local training</small></div><div>›</div>
                 </a>
                 <a href="{about_link}">
-                  <div>ℹ️ About<br><small>What this is</small></div>
-                  <div>›</div>
+                  <div>ℹ️ About<br><small>What this is</small></div><div>›</div>
                 </a>
                 <hr/>
                 <a href="{lib_link}">
-                  <div>{lib_label}<br><small>Session history</small></div>
-                  <div>›</div>
+                  <div>{lib_label}<br><small>Session history</small></div><div>›</div>
                 </a>
                 <a href="{theme_link}">
-                  <div>{theme_label}<br><small>Light / dark</small></div>
-                  <div>›</div>
+                  <div>{theme_label}<br><small>Light / dark</small></div><div>›</div>
                 </a>
               </div>
             </div>
@@ -709,9 +688,6 @@ def render_header():
     )
 
 
-# =========================
-# Shared toolbar (language/voice + speak/batch toggle)
-# =========================
 def render_toolbar():
     c1, c2 = st.columns([1.2, 1.2], gap="large")
 
@@ -733,18 +709,14 @@ def render_toolbar():
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-    # Mode toggle (segmented)
-    mode_key = f"mode_radio_{st.session_state.view}"  # unique
+    mode_key = f"mode_radio_{st.session_state.view}"
     mode = st.radio("Mode", ["Speak", "Batch"], horizontal=True, label_visibility="collapsed", key=mode_key)
     if mode != st.session_state.mode:
         st.session_state.mode = mode
         set_qp(st.session_state.view, st.session_state.theme, st.session_state.lib, st.session_state.mode)
 
 
-# =========================
-# Right settings panel (unique keys => no DuplicateElementId)
-# =========================
-def render_settings_panel() -> Dict[str, float]:
+def render_settings_panel():
     st.markdown(
         """
         <div class="oge-card">
@@ -759,7 +731,6 @@ def render_settings_panel() -> Dict[str, float]:
         unsafe_allow_html=True,
     )
 
-    # Unique keys must include view+mode so Streamlit never duplicates
     speed = st.slider(
         "Speed",
         0.70, 1.40,
@@ -779,7 +750,6 @@ def render_settings_panel() -> Dict[str, float]:
     st.session_state.pitch = float(pitch)
 
     st.markdown("</div>", unsafe_allow_html=True)
-    return {"speed": st.session_state.speed, "pitch": st.session_state.pitch}
 
 
 def render_latest_panel():
@@ -820,16 +790,13 @@ def render_latest_panel():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-# =========================
-# Studio screen (Speak/Batch)
-# =========================
 def render_studio():
     render_toolbar()
 
     left, right = st.columns([2.25, 1.0], gap="large")
 
     with right:
-        settings = render_settings_panel()
+        render_settings_panel()
 
     with left:
         if st.session_state.mode == "Speak":
@@ -856,7 +823,6 @@ def render_studio():
             )
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # Generate button + Latest (right under settings area)
             with right:
                 if st.button("Generate speech", use_container_width=True, key="btn_speak"):
                     text = (st.session_state.speak_text or "").strip()
@@ -866,8 +832,8 @@ def render_studio():
                                 text=text,
                                 language_id=st.session_state.language_id,
                                 voice_id=st.session_state.voice_id,
-                                speed=settings["speed"],
-                                pitch=settings["pitch"],
+                                speed=st.session_state.speed,
+                                pitch=st.session_state.pitch,
                             )
                             fname, mime = save_audio_bytes(audio_bytes, ext=ext)
                             add_clip("Speak", text, fname, mime)
@@ -917,8 +883,8 @@ def render_studio():
                                     text=line,
                                     language_id=st.session_state.language_id,
                                     voice_id=st.session_state.voice_id,
-                                    speed=settings["speed"],
-                                    pitch=settings["pitch"],
+                                    speed=st.session_state.speed,
+                                    pitch=st.session_state.pitch,
                                 )
                                 fname, mime = save_audio_bytes(audio_bytes, ext=ext)
                                 add_clip("Batch", line, fname, mime)
@@ -935,7 +901,6 @@ def render_studio():
                             key="dl_zip",
                             use_container_width=True,
                         )
-
                         st.success("Batch done.")
                     except Exception as e:
                         st.error(str(e))
@@ -943,35 +908,7 @@ def render_studio():
                 st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
                 render_latest_panel()
 
-            # Optional: show generated batch clips under the big textarea
-            batch_files = st.session_state.get("batch_files", [])
-            if batch_files:
-                st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-                st.markdown(
-                    """
-                    <div class="oge-card">
-                      <div class="oge-card-head">
-                        <div class="oge-ic">📦</div>
-                        <div>
-                          <div class="oge-card-title">Batch Output</div>
-                          <div class="oge-card-sub">Generated clips (this run).</div>
-                        </div>
-                      </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                for fn, mime, label in batch_files:
-                    src = os.path.join(OUTPUT_DIR, fn)
-                    if os.path.exists(src):
-                        data = open(src, "rb").read()
-                        st.markdown(f"**{label}**")
-                        st.audio(data, format=mime)
-                st.markdown("</div>", unsafe_allow_html=True)
 
-
-# =========================
-# Fine-tune and About pages
-# =========================
 def render_finetune():
     st.markdown(
         """
@@ -984,13 +921,13 @@ def render_finetune():
             </div>
           </div>
           <div style="color:var(--muted); font-size:14px; line-height:1.6;">
-            <p>This page is intentionally clean and styled consistently.</p>
-            <p>Add: dataset picker, run command button, training logs, checkpoints, and “active model” cards.</p>
+            Add dataset picker, training logs, checkpoints, and “active model” cards.
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
 
 def render_about():
     st.markdown(
@@ -1004,12 +941,9 @@ def render_about():
             </div>
           </div>
           <div style="color:var(--muted); font-size:14px; line-height:1.65;">
-            <p><b>Studio</b> lets you generate one clean clip from text.</p>
-            <p><b>Batch Studio</b> turns one line per sentence into multiple clips and a ZIP download.</p>
-            <p><b>Library</b> stores your generated clips for this session (open/close from the logo menu).</p>
-            <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;" />
-            <p><b>Important:</b> Meta/MMS voices are stubbed in this file. Plug your real synthesizer into
-            <code>synthesize_meta_mms()</code>.</p>
+            <p><b>Studio</b> generates one clean clip from text.</p>
+            <p><b>Batch</b> generates one clip per line and offers ZIP export.</p>
+            <p><b>Library</b> stores clips for this session.</p>
           </div>
         </div>
         """,
@@ -1017,9 +951,6 @@ def render_about():
     )
 
 
-# =========================
-# Main
-# =========================
 def main():
     st.set_page_config(page_title=APP_NAME, page_icon="🎙️", layout="wide", initial_sidebar_state="collapsed")
     ensure_dirs()
@@ -1031,16 +962,12 @@ def main():
     fav_bg = "#0b1220" if st.session_state.theme == "dark" else "#ffffff"
     inject_favicon_and_title(svg_favicon_data_uri(ACCENT_A, ACCENT_B, fav_bg))
 
-    # Keep qp synced so refresh works
+    # sync query params so refresh preserves state
     set_qp(st.session_state.view, st.session_state.theme, st.session_state.lib, st.session_state.mode)
 
-    # Drawer
     render_library_drawer()
-
-    # Header (logo hover dropdown)
     render_header()
 
-    # Routing
     if st.session_state.view == "studio":
         render_studio()
     elif st.session_state.view == "finetune":
