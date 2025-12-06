@@ -1,8 +1,8 @@
 # app.py
 """
-ONGEA LABS v8.2 — Modern Glass TTS Studio (Light + Dark) • Speak/Batch Toggle • Sidebar History (Menu Toggle)
+ONGEA LABS v8.12.25 — Modern Glass TTS Studio (Light + Dark) • Ongea/Batch Toggle • Sidebar History (Menu Toggle)
 - Clean, modern UI (mobile-style glass) with big text area + settings on the side
-- Speak/Batch toggled (no tabs), no Demo/Clear buttons
+- Ongea/Batch toggled (no tabs), no Demo/Clear buttons
 - One Menu dropdown (top-right) controls: Studio / Fine-tune / About / Theme / Sidebar
 - Fixes duplicate slider IDs (unique keys) + removes stray st.code HTML blocks (and hard-hides code blocks just in case)
 - Smaller Language / Voice inputs (styled)
@@ -486,7 +486,7 @@ def _init_state(st):
         st.session_state.voice_name = None
 
     if "mode" not in st.session_state:
-        st.session_state.mode = "Speak"  # Speak | Batch
+        st.session_state.mode = "Ongea"  # Speak | Batch
 
     if "speak_text" not in st.session_state:
         st.session_state.speak_text = ""
@@ -908,13 +908,13 @@ def studio_top_controls(st):
         )
         st.session_state.voice_name = voice_name
 
-    # Speak/Batch toggle
+    # Ongea/Batch toggle
     st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
     st.markdown("<div class='oge-toggle-wrap'>", unsafe_allow_html=True)
     mode = st.radio(
         "Mode",
-        ["Speak", "Batch"],
-        index=0 if st.session_state.mode == "Speak" else 1,
+        ["Ongea", "Batch"],
+        index=0 if st.session_state.mode == "Ongea" else 1,
         key="mode_radio",
         horizontal=True,
         label_visibility="collapsed",
@@ -954,10 +954,10 @@ def studio_layout(st, lang_code: str, voices: Dict[str, str]):
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:0.8rem;'></div>", unsafe_allow_html=True)
 
-    if st.session_state.mode == "Speak":
+    if st.session_state.mode == "Ongea":
         with left:
             st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-            st.markdown("<div style='font-weight:900;font-size:1.25rem;margin-bottom:0.2rem;'>Speak</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-weight:900;font-size:1.25rem;margin-bottom:0.2rem;'>Ongea</div>", unsafe_allow_html=True)
             st.markdown("<div class='oge-muted' style='margin-bottom:0.75rem;'>Paste text → generate one clean clip.</div>", unsafe_allow_html=True)
             txt = st.text_area(
                 "Text",
@@ -1080,7 +1080,7 @@ def _do_generate_speak(st, lang_code: str, voices: Dict[str, str]):
             "ts": datetime.now().strftime("%H:%M:%S"),
             "lang_code": lang_code,
             "voice_name": voice_name,
-            "label": "Speak",
+            "label": "Ongea",
             "wav_path": str(out_wav),
             "sr": sr,
         }
@@ -1163,7 +1163,7 @@ def about_view(st):
 Ongea is a clean text-to-speech studio for African voices.
 <br/><br/>
 <b>What it does</b><br/>
-• Speak: generate one clean clip from pasted text<br/>
+• Ongea: generate one clean clip from pasted text<br/>
 • Batch: generate one WAV per line (studio workflow)<br/>
 • Tone: speed + pitch controls applied at export<br/>
 • History: all generated clips saved during the session<br/><br/>
