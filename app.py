@@ -1,6 +1,6 @@
 # app.py
 """
-ONGEA v8.2 — Modern Glass TTS Studio (Light + Dark) • Speak/Batch Toggle • Sidebar History (Menu Toggle)
+ONGEA LABS v8.2 — Modern Glass TTS Studio (Light + Dark) • Speak/Batch Toggle • Sidebar History (Menu Toggle)
 - Clean, modern UI (mobile-style glass) with big text area + settings on the side
 - Speak/Batch toggled (no tabs), no Demo/Clear buttons
 - One Menu dropdown (top-right) controls: Studio / Fine-tune / About / Theme / Sidebar
@@ -64,7 +64,7 @@ LANGUAGES: Dict[str, str] = {
     "Taita (Kidawida / Dawida) — KE": "dav",
 }
 
-PROJECT_NAME = "ongea-v5-mms-tts-multi"
+PROJECT_NAME = "ongea labs-v8-mms-tts-multi"
 OUTPUT_DIR = Path("./outputs") / PROJECT_NAME
 CONVERTED_DIR = OUTPUT_DIR / "training_checkpoint_with_discriminator"
 FINETUNE_REPO = Path("./finetune-hf-vits")
@@ -92,33 +92,33 @@ STRIP_PUNCT = False
 
 VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
     "swh": {
-        "Ongea Swahili Male / Neutral (Meta Base)": "facebook/mms-tts-swh",
-        "Ongea Swahili Female (Mozilla Lady)": "Benjamin-png/swahili-mms-tts-mozilla-lady-voice-finetuned",
-        "Ongea Swahili Studio (Fine-tuned)": "Benjamin-png/swahili-mms-tts-finetuned",
-        "Ongea Swahili Narrator (OpenBible)": "bookbot/vits-base-sw-KE-OpenBible",
-        "Ongea Swahili SALAMA (Prosody-rich)": "EYEDOL/SALAMA_TTS",
+        "Ongea Labs Swahili Male / Neutral (Meta Base)": "facebook/mms-tts-swh",
+        "Ongea Labs Swahili Female (Mozilla Lady)": "Benjamin-png/swahili-mms-tts-mozilla-lady-voice-finetuned",
+        "Ongea Labs Swahili Studio (Fine-tuned)": "Benjamin-png/swahili-mms-tts-finetuned",
+        "Ongea Labs Swahili Narrator (OpenBible)": "bookbot/vits-base-sw-KE-OpenBible",
+        "Ongea Labs Swahili SALAMA (Prosody-rich)": "EYEDOL/SALAMA_TTS",
     },
-    "amh": {"Ongea Amharic (Meta MMS Base)": "facebook/mms-tts-amh"},
-    "som": {"Ongea Somali (Meta MMS Base)": "facebook/mms-tts-som"},
-    "yor": {"Ongea Yoruba (Meta MMS Base)": "facebook/mms-tts-yor"},
-    "sna": {"Ongea Shona (Meta MMS Base)": "facebook/mms-tts-sna"},
-    "xho": {"Ongea Xhosa (Meta MMS Base)": "facebook/mms-tts-xho"},
-    "afr": {"Ongea Afrikaans (Meta MMS Base)": "facebook/mms-tts-afr"},
-    "lin": {"Ongea Lingala (Meta MMS Base)": "facebook/mms-tts-lin"},
-    "kon": {"Ongea Kongo (Meta MMS Base)": "facebook/mms-tts-kon"},
+    "amh": {"Ongea Labs Amharic (Meta MMS Base)": "facebook/mms-tts-amh"},
+    "som": {"Ongea Labs Somali (Meta MMS Base)": "facebook/mms-tts-som"},
+    "yor": {"Ongea Labs Yoruba (Meta MMS Base)": "facebook/mms-tts-yor"},
+    "sna": {"Ongea Labs Shona (Meta MMS Base)": "facebook/mms-tts-sna"},
+    "xho": {"Ongea Labs Xhosa (Meta MMS Base)": "facebook/mms-tts-xho"},
+    "afr": {"Ongea Labs Afrikaans (Meta MMS Base)": "facebook/mms-tts-afr"},
+    "lin": {"Ongea Labs Lingala (Meta MMS Base)": "facebook/mms-tts-lin"},
+    "kon": {"Ongea Labs Kongo (Meta MMS Base)": "facebook/mms-tts-kon"},
     "luo": {
-        "Ongea Luo (CLEAR YourTTS, HF/Coqui)": "coqui:CLEAR-Global/YourTTS-Luo",
-        "Ongea Luo (CLEAR XTTS, HF/Coqui)": "coqui:CLEAR-Global/XTTS-Luo",
-        "Ongea Luo (Meta MMS Base)": "facebook/mms-tts-luo",
+        "Ongea Labs Luo (CLEAR YourTTS, HF/Coqui)": "coqui:CLEAR-Global/YourTTS-Luo",
+        "Ongea Labs Luo (CLEAR XTTS, HF/Coqui)": "coqui:CLEAR-Global/XTTS-Luo",
+        "Ongea Labs Luo (Meta MMS Base)": "facebook/mms-tts-luo",
     },
-    "kik": {"Ongea Gikuyu (Meta MMS Base)": "facebook/mms-tts-kik"},
-    "mer": {"Ongea Ameru/Meru (Meta MMS Base)": "facebook/mms-tts-mer"},
-    "kam": {"Ongea Kamba (Meta MMS Base)": "facebook/mms-tts-kam"},
-    "guz": {"Ongea Ekegusii/Kisii (Meta MMS Base)": "facebook/mms-tts-guz"},
-    "luy": {"Ongea Luhya (Meta MMS Base)": "facebook/mms-tts-luy"},
-    "kln": {"Ongea Kalenjin (Meta MMS Base)": "facebook/mms-tts-kln"},
-    "mas": {"Ongea Maasai (Meta MMS Base)": "facebook/mms-tts-mas"},
-    "dav": {"Ongea Taita/Dawida (Meta MMS Base)": "facebook/mms-tts-dav"},
+    "kik": {"Ongea Labs Gikuyu (Meta MMS Base)": "facebook/mms-tts-kik"},
+    "mer": {"Ongea Labs Labs Ameru/Meru (Meta MMS Base)": "facebook/mms-tts-mer"},
+    "kam": {"Ongea Labs Kamba (Meta MMS Base)": "facebook/mms-tts-kam"},
+    "guz": {"Ongea Labs Ekegusii/Kisii (Meta MMS Base)": "facebook/mms-tts-guz"},
+    "luy": {"Ongea Labs Luhya (Meta MMS Base)": "facebook/mms-tts-luy"},
+    "kln": {"Ongea Labs Kalenjin (Meta MMS Base)": "facebook/mms-tts-kln"},
+    "mas": {"Ongea Labs Maasai (Meta MMS Base)": "facebook/mms-tts-mas"},
+    "dav": {"Ongea Labs Taita/Dawida (Meta MMS Base)": "facebook/mms-tts-dav"},
 }
 
 
@@ -506,7 +506,7 @@ def _init_state(st):
 def get_voices_for(lang_code: str, lang_name: str):
     voices = VOICE_LIBRARY_BY_LANG.get(lang_code, {})
     if not voices:
-        voices = {f"Ongea {lang_name.split('—')[0].strip()} (Meta MMS Base)": f"facebook/mms-tts-{lang_code}"}
+        voices = {f"Ongea Labs {lang_name.split('—')[0].strip()} (Meta MMS Base)": f"facebook/mms-tts-{lang_code}"}
     return voices
 
 def get_voice_loader():
@@ -830,7 +830,7 @@ def header_bar(st):
   <div class="oge-brand">
     <div class="oge-logo">🎙️</div>
     <div>
-      <div class="oge-title">Ongea</div>
+      <div class="oge-title">Ongea Labs</div>
       <div class="oge-sub">African TTS Studio</div>
     </div>
   </div>
@@ -845,7 +845,7 @@ def header_bar(st):
         st.markdown('</div>', unsafe_allow_html=True)
 
     with pop:
-        st.markdown("<div style='font-weight:900;font-size:1.02rem;margin-bottom:0.35rem;'>Ongea Menu</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-weight:900;font-size:1.02rem;margin-bottom:0.35rem;'>Ongea Labs Menu</div>", unsafe_allow_html=True)
 
         view = st.radio(
             "View",
@@ -963,7 +963,7 @@ def studio_layout(st, lang_code: str, voices: Dict[str, str]):
                 "Text",
                 value=st.session_state.speak_text,
                 height=260,
-                placeholder="Example:\nHabari! Karibu kwenye Ongea.\nAndika maandishi yako hapa…",
+                placeholder="Example:\nHabari! Karibu kwenye Ongea Labs.\nAndika maandishi yako hapa…",
                 key="speak_text_area",
                 label_visibility="collapsed",
             )
