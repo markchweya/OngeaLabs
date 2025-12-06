@@ -831,7 +831,7 @@ def header_bar(st):
     <div class="oge-logo">🎙️</div>
     <div>
       <div class="oge-title">Ongea</div>
-      <div class="oge-sub">Calm African TTS Studio</div>
+      <div class="oge-sub">African TTS Studio</div>
     </div>
   </div>
 </div>
