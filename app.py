@@ -1,17 +1,8 @@
 # app.py
 """
 ONGEA LABS — ChatGPT-style TTS Studio (Light + Dark) • Sidebar Chats • Bottom Composer
-- True ChatGPT-like layout: left sidebar (always usable) + centered chat area + bottom composer (no scrolling to reach it)
-- Sidebar collapse/expand works reliably (no CSS transforms that "trap" the sidebar)
-- Clean nav buttons (Studio / Fine-tune / About) + Theme/Settings styled (no “basic Streamlit” look)
-- Settings live in a popover (language/voice/speed/pitch) so the chat area stays clean
-- Ongea = single clip, Batch = one clip per line (paste multi-line into the composer)
-
-Run:
-  streamlit run app.py
-
-Train:
-  python app.py --train --lang swh
+Fix in this version:
+- ✅ No more StreamlitDuplicateElementKey: settings widgets have unique keys per location (sidebar vs top popover)
 """
 
 import os
@@ -485,11 +476,9 @@ def _init_state(st):
     ss.setdefault("speed", 1.0)
     ss.setdefault("pitch", 0.0)
 
-    # Chats = history of generations (ChatGPT-style list)
-    ss.setdefault("chats", [])  # list[dict]
+    ss.setdefault("chats", [])  # history
     ss.setdefault("active_chat_id", None)
 
-    # UI helpers
     ss.setdefault("search_q", "")
 
 def get_voices_for(lang_code: str, lang_name: str):
@@ -514,37 +503,29 @@ def _make_title(text: str) -> str:
 def inject_css(st):
     theme = st.session_state.theme
     collapsed = st.session_state.sidebar_collapsed
-
     sbw = "84px" if collapsed else "320px"
 
-    # CSS targets Streamlit widgets to look like ChatGPT UI
     st.markdown(f"""
 <style>
-/* --- Kill Streamlit chrome --- */
 #MainMenu, footer, header {{visibility:hidden;}}
 [data-testid="stToolbar"]{{display:none !important;}}
 [data-testid="stStatusWidget"]{{display:none !important;}}
 [data-testid="stHeader"]{{display:none !important;}}
 [data-testid="stDecoration"]{{display:none !important;}}
 
-/* --- Fonts --- */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {{
   --sbw: {sbw};
   --radius: 14px;
-
   --accent: #10a37f;
   --accent2: rgba(16,163,127,0.18);
-  --danger: #ef4444;
-
   --bg: {"#0f1115" if theme=="dark" else "#f7f7f8"};
   --panel: {"#16181d" if theme=="dark" else "#ffffff"};
   --panel2: {"#121418" if theme=="dark" else "#f3f4f6"};
   --border: {"rgba(255,255,255,0.08)" if theme=="dark" else "rgba(0,0,0,0.08)"};
   --text: {"#f3f4f6" if theme=="dark" else "#0f172a"};
   --muted: {"rgba(243,244,246,0.68)" if theme=="dark" else "rgba(15,23,42,0.60)"};
-
   --shadow: 0 10px 30px rgba(0,0,0,{"0.35" if theme=="dark" else "0.08"});
 }}
 
@@ -561,13 +542,10 @@ html, body {{
 .block-container {{
   max-width: 1100px !important;
   padding-top: 1.3rem !important;
-  padding-bottom: 5.5rem !important; /* room for composer */
+  padding-bottom: 5.5rem !important;
 }}
 
-/* --- Sidebar width + styling --- */
-section[data-testid="stSidebar"] {{
-  width: var(--sbw) !important;
-}}
+section[data-testid="stSidebar"] {{ width: var(--sbw) !important; }}
 section[data-testid="stSidebar"] > div {{
   width: var(--sbw) !important;
   background: var(--panel) !important;
@@ -577,9 +555,7 @@ section[data-testid="stSidebar"] > div {{
   padding: 1.0rem 0.85rem 1.0rem 0.85rem !important;
 }}
 
-/* Hide labels when collapsed */
 {"" if not collapsed else """
-/* collapse: hide most text, keep icons */
 .oge-hide-when-collapsed{display:none !important;}
 .oge-only-when-collapsed{display:block !important;}
 """}
@@ -587,7 +563,6 @@ section[data-testid="stSidebar"] > div {{
 .oge-only-when-collapsed{display:none !important;}
 """}
 
-/* --- Global button style --- */
 .stButton > button {{
   width: 100% !important;
   border-radius: var(--radius) !important;
@@ -602,11 +577,8 @@ section[data-testid="stSidebar"] > div {{
   border-color: rgba(16,163,127,0.35) !important;
   background: rgba(16,163,127,0.10) !important;
 }}
-.stButton > button:active {{
-  transform: translateY(1px);
-}}
+.stButton > button:active {{ transform: translateY(1px); }}
 
-/* Primary button helper (wrapped in oge-primary) */
 .oge-primary .stButton > button {{
   background: var(--accent2) !important;
   border-color: rgba(16,163,127,0.45) !important;
@@ -615,7 +587,6 @@ section[data-testid="stSidebar"] > div {{
   background: rgba(16,163,127,0.22) !important;
 }}
 
-/* --- Sidebar brand row --- */
 .oge-brand {{
   display:flex; align-items:center; gap:0.65rem;
   padding: 0.15rem 0.1rem 0.85rem 0.1rem;
@@ -626,14 +597,9 @@ section[data-testid="stSidebar"] > div {{
   border: 1px solid rgba(16,163,127,0.25);
   display:flex; align-items:center; justify-content:center;
 }}
-.oge-brand-title {{
-  font-size: 1.05rem; font-weight: 800; line-height: 1.05;
-}}
-.oge-brand-sub {{
-  font-size: 0.86rem; color: var(--muted);
-}}
+.oge-brand-title {{ font-size: 1.05rem; font-weight: 800; line-height: 1.05; }}
+.oge-brand-sub {{ font-size: 0.86rem; color: var(--muted); }}
 
-/* --- Sidebar inputs --- */
 [data-testid="stTextInput"] input {{
   background: var(--panel2) !important;
   border: 1px solid var(--border) !important;
@@ -643,7 +609,6 @@ section[data-testid="stSidebar"] > div {{
 }}
 [data-testid="stTextInput"] label {{ display:none !important; }}
 
-/* --- Sidebar nav pills (radio) --- */
 .oge-nav div[role="radiogroup"] {{
   display:flex !important;
   gap: 0.45rem !important;
@@ -661,18 +626,13 @@ section[data-testid="stSidebar"] > div {{
   border-color: rgba(16,163,127,0.35) !important;
   background: rgba(16,163,127,0.10) !important;
 }}
-.oge-nav div[role="radiogroup"] > label input {{
-  display:none !important;
-}}
+.oge-nav div[role="radiogroup"] > label input {{ display:none !important; }}
 .oge-nav div[role="radiogroup"] > label:has(input:checked) {{
   background: var(--accent2) !important;
   border-color: rgba(16,163,127,0.45) !important;
 }}
-.oge-nav div[role="radiogroup"] > label span {{
-  font-weight: 800 !important;
-}}
+.oge-nav div[role="radiogroup"] > label span {{ font-weight: 800 !important; }}
 
-/* --- Chat list (radio) --- */
 .oge-chatlist div[role="radiogroup"] > label {{
   width: 100% !important;
   border-radius: 12px !important;
@@ -690,42 +650,21 @@ section[data-testid="stSidebar"] > div {{
 }}
 .oge-chatlist div[role="radiogroup"] > label input {{ display:none !important; }}
 
-/* --- Sidebar bottom row buttons --- */
-.oge-row {{
-  display:flex; gap:0.6rem;
-}}
-.oge-row > div {{
-  flex: 1 1 0;
-}}
+.oge-row {{ display:flex; gap:0.6rem; }}
+.oge-row > div {{ flex: 1 1 0; }}
 
-/* --- Main hero --- */
-.oge-hero {{
-  padding-top: 3.2rem;
-  text-align:center;
-}}
+.oge-hero {{ padding-top: 3.2rem; text-align:center; }}
 .oge-hero h1 {{
-  font-size: 3.0rem;
-  font-weight: 900;
-  letter-spacing: -0.03em;
+  font-size: 3.0rem; font-weight: 900; letter-spacing: -0.03em;
   margin: 0 0 0.6rem 0;
 }}
-.oge-hero p {{
-  margin: 0;
-  color: var(--muted);
-  font-size: 1.05rem;
-}}
+.oge-hero p {{ margin: 0; color: var(--muted); font-size: 1.05rem; }}
 
-/* --- Top pills in main --- */
 .oge-topbar {{
-  display:flex;
-  align-items:center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin: 0.1rem 0 1.0rem 0;
+  display:flex; align-items:center; justify-content: space-between;
+  gap: 1rem; margin: 0.1rem 0 1.0rem 0;
 }}
-.oge-pills {{
-  display:flex; gap: 0.6rem; flex-wrap: wrap;
-}}
+.oge-pills {{ display:flex; gap: 0.6rem; flex-wrap: wrap; }}
 .oge-pill {{
   border: 1px solid var(--border);
   background: var(--panel);
@@ -734,13 +673,8 @@ section[data-testid="stSidebar"] > div {{
   color: var(--text);
   font-weight: 800;
 }}
-.oge-pill small {{
-  color: var(--muted);
-  font-weight: 700;
-  margin-right: 0.3rem;
-}}
+.oge-pill small {{ color: var(--muted); font-weight: 700; margin-right: 0.3rem; }}
 
-/* --- Settings popover inputs --- */
 div[data-baseweb="select"] > div {{
   background: var(--panel2) !important;
   border: 1px solid var(--border) !important;
@@ -750,11 +684,7 @@ div[data-baseweb="select"] span, div[data-baseweb="select"] input {{
   color: var(--text) !important;
   font-weight: 700 !important;
 }}
-[data-testid="stSlider"] > div {{
-  padding-top: 0.2rem;
-}}
 
-/* --- Chat messages --- */
 [data-testid="stChatMessage"] {{
   border: 1px solid var(--border) !important;
   border-radius: 16px !important;
@@ -765,16 +695,10 @@ div[data-baseweb="select"] span, div[data-baseweb="select"] input {{
   margin: 0.15rem 0 0.35rem 0;
   line-height: 1.45;
 }}
-[data-testid="stChatMessage"] .stAudio {{
-  margin-top: 0.35rem;
-}}
 
-/* --- Composer (chat input) --- */
 div[data-testid="stChatInput"] {{
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 0; right: 0; bottom: 0;
   padding: 0.95rem 0;
   background: linear-gradient(to top, rgba(0,0,0,{"0.55" if theme=="dark" else "0.06"}), transparent);
   z-index: 50;
@@ -795,20 +719,59 @@ div[data-testid="stChatInput"] textarea {{
 div[data-testid="stChatInput"] textarea::placeholder {{
   color: rgba(148,163,184,{"0.65" if theme=="dark" else "0.9"}) !important;
 }}
-
-/* --- Audio player --- */
-audio {{
-  width: 100% !important;
-  border-radius: 999px !important;
-}}
 </style>
 """, unsafe_allow_html=True)
+
+def settings_ui(st, key_prefix: str):
+    """
+    key_prefix is REQUIRED so the same settings panel can appear in multiple places
+    (sidebar popover + top-right popover) without duplicate widget keys.
+    """
+    ss = st.session_state
+
+    st.markdown("**Language**")
+    lang_keys = list(LANGUAGES.keys())
+    ss.lang_name = st.selectbox(
+        "Language",
+        lang_keys,
+        index=lang_keys.index(ss.lang_name) if ss.lang_name in lang_keys else 0,
+        label_visibility="collapsed",
+        key=f"{key_prefix}_lang",
+    )
+    lang_code = LANGUAGES[ss.lang_name]
+
+    voices = get_voices_for(lang_code, ss.lang_name)
+    voice_names = list(voices.keys())
+    if ss.voice_name not in voice_names:
+        ss.voice_name = voice_names[0]
+
+    st.markdown("**Voice / Model**")
+    ss.voice_name = st.selectbox(
+        "Voice",
+        voice_names,
+        index=voice_names.index(ss.voice_name),
+        label_visibility="collapsed",
+        key=f"{key_prefix}_voice",
+    )
+
+    st.markdown("**Mode**")
+    ss.mode = st.radio(
+        "Mode",
+        ["Ongea", "Batch"],
+        index=0 if ss.mode == "Ongea" else 1,
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"{key_prefix}_mode",
+    )
+
+    st.markdown("**Tone**")
+    ss.speed = st.slider("Speed", 0.75, 1.50, float(ss.speed), 0.05, key=f"{key_prefix}_speed")
+    ss.pitch = st.slider("Pitch (semitones)", -4.0, 4.0, float(ss.pitch), 0.5, key=f"{key_prefix}_pitch")
 
 def sidebar_ui(st):
     sb = st.sidebar
     ss = st.session_state
 
-    # Brand + collapse
     c1, c2 = sb.columns([0.82, 0.18], gap="small")
     with c1:
         sb.markdown(
@@ -828,14 +791,12 @@ def sidebar_ui(st):
             ss.sidebar_collapsed = not ss.sidebar_collapsed
             st.rerun()
 
-    # New chat
     sb.markdown('<div class="oge-primary">', unsafe_allow_html=True)
     if sb.button("＋ New chat" if not ss.sidebar_collapsed else "＋", key="sb_new_chat"):
         ss.active_chat_id = None
         st.rerun()
     sb.markdown("</div>", unsafe_allow_html=True)
 
-    # Search + nav
     if not ss.sidebar_collapsed:
         sb.markdown('<div class="oge-hide-when-collapsed">', unsafe_allow_html=True)
         ss.search_q = sb.text_input("Search chats", value=ss.search_q, placeholder="Search chats", key="sb_search")
@@ -856,24 +817,18 @@ def sidebar_ui(st):
 
     sb.markdown("<div style='height:0.65rem;'></div>", unsafe_allow_html=True)
 
-    # Chats header
     if not ss.sidebar_collapsed:
         sb.markdown("<div class='oge-hide-when-collapsed' style='font-weight:900; color: var(--muted); font-size:0.9rem;'>Your chats</div>", unsafe_allow_html=True)
 
-    # Chats list
-    chats = ss.chats[:]
-    q = (ss.search_q or "").strip().lower()
+    chats = st.session_state.chats[:]
+    q = (st.session_state.search_q or "").strip().lower()
     if q:
         chats = [c for c in chats if q in (c.get("title","").lower() + " " + (c.get("text","").lower()))]
-
-    chats = list(reversed(chats))  # newest first
+    chats = list(reversed(chats))
 
     if chats:
         options = [f"{c['id']}|{c['title']}" for c in chats]
-        labels = [c["title"] for c in chats]
-
-        # Map active id -> index
-        active = ss.active_chat_id
+        active = st.session_state.active_chat_id
         idx = 0
         if active:
             for i, c in enumerate(chats):
@@ -891,7 +846,7 @@ def sidebar_ui(st):
             key="sb_chat_pick",
         )
         sb.markdown("</div>", unsafe_allow_html=True)
-        ss.active_chat_id = pick.split("|", 1)[0]
+        st.session_state.active_chat_id = pick.split("|", 1)[0]
     else:
         if not ss.sidebar_collapsed:
             sb.markdown(
@@ -901,65 +856,19 @@ def sidebar_ui(st):
 
     sb.markdown("<div style='height:0.85rem;'></div>", unsafe_allow_html=True)
 
-    # Bottom controls: Theme + Settings
     if not ss.sidebar_collapsed:
         sb.markdown('<div class="oge-row oge-hide-when-collapsed">', unsafe_allow_html=True)
         b1, b2 = sb.columns(2, gap="small")
         with b1:
-            new_theme = "light" if ss.theme == "dark" else "dark"
             if sb.button(("🌞 Theme" if ss.theme == "dark" else "🌚 Theme"), key="sb_theme_btn"):
-                ss.theme = new_theme
+                ss.theme = "light" if ss.theme == "dark" else "dark"
                 st.rerun()
         with b2:
             with sb.popover("⚙️ Settings", use_container_width=True):
-                settings_ui(st)
+                settings_ui(st, key_prefix="sbset")
         sb.markdown("</div>", unsafe_allow_html=True)
 
-def settings_ui(st):
-    import streamlit as st  # keep local for popover context
-
-    ss = st.session_state
-    st.markdown("**Language**")
-    lang_keys = list(LANGUAGES.keys())
-    ss.lang_name = st.selectbox(
-        "Language",
-        lang_keys,
-        index=lang_keys.index(ss.lang_name) if ss.lang_name in lang_keys else 0,
-        label_visibility="collapsed",
-        key="set_lang",
-    )
-    lang_code = LANGUAGES[ss.lang_name]
-
-    voices = get_voices_for(lang_code, ss.lang_name)
-    voice_names = list(voices.keys())
-    if ss.voice_name not in voice_names:
-        ss.voice_name = voice_names[0]
-
-    st.markdown("**Voice / Model**")
-    ss.voice_name = st.selectbox(
-        "Voice",
-        voice_names,
-        index=voice_names.index(ss.voice_name),
-        label_visibility="collapsed",
-        key="set_voice",
-    )
-
-    st.markdown("**Mode**")
-    ss.mode = st.radio(
-        "Mode",
-        ["Ongea", "Batch"],
-        index=0 if ss.mode == "Ongea" else 1,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="set_mode",
-    )
-
-    st.markdown("**Tone**")
-    ss.speed = st.slider("Speed", 0.75, 1.50, float(ss.speed), 0.05, key="set_speed")
-    ss.pitch = st.slider("Pitch (semitones)", -4.0, 4.0, float(ss.pitch), 0.5, key="set_pitch")
-
 def _generate_and_store(st, user_text: str):
-    import streamlit as st  # for spinner context
     ss = st.session_state
 
     lang_code = LANGUAGES[ss.lang_name]
@@ -969,18 +878,14 @@ def _generate_and_store(st, user_text: str):
 
     load_voice = get_voice_loader(st)
 
-    # Decide mode
-    mode = ss.mode
-    is_batch = (mode == "Batch")
+    is_batch = (ss.mode == "Batch")
 
-    # Build outputs
     out_dir = OUTPUT_DIR / "app_outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     chat_id = f"c_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
     title = _make_title(user_text)
 
-    # Generation
     outs: List[Path] = []
     sr = TARGET_SR
 
@@ -1004,13 +909,11 @@ def _generate_and_store(st, user_text: str):
                 write_wav(p, audio, sr)
                 outs.append(p)
 
-    # Store chat
     chat = {
         "id": chat_id,
         "title": title,
         "ts": datetime.now().strftime("%H:%M:%S"),
-        "view": ss.view,
-        "mode": mode,
+        "mode": ss.mode,
         "lang_code": lang_code,
         "lang_name": ss.lang_name,
         "voice_name": voice_name,
@@ -1025,11 +928,8 @@ def _generate_and_store(st, user_text: str):
     ss.active_chat_id = chat_id
 
 def main_view(st):
-    import streamlit as st  # local
-
     ss = st.session_state
 
-    # Topbar pills + settings popover (for quick access)
     left, right = st.columns([0.78, 0.22], gap="small")
     with left:
         st.markdown(
@@ -1045,9 +945,8 @@ def main_view(st):
         )
     with right:
         with st.popover("⚙️", use_container_width=True):
-            settings_ui(st)
+            settings_ui(st, key_prefix="topset")
 
-    # Content based on view
     if ss.view == "finetune":
         st.markdown("## Fine-tuning (Local)")
         st.markdown(
@@ -1067,15 +966,10 @@ Ongea is a clean text-to-speech studio for African voices.
 - **Ongea**: one clean clip from pasted text
 - **Batch**: one WAV per line (studio workflow)
 - **Tone**: speed + pitch controls applied at export
-
-**Engines**
-- Meta MMS (HF VITS) + community voices
-- Optional Coqui voices via `coqui:` prefix
 """
         )
         return
 
-    # Studio view
     active = ss.active_chat_id
     chat = None
     if active:
@@ -1095,7 +989,6 @@ Ongea is a clean text-to-speech studio for African voices.
             unsafe_allow_html=True,
         )
     else:
-        # Chat-like transcript
         st.chat_message("user").markdown(chat["text"])
         with st.chat_message("assistant"):
             st.markdown(
@@ -1132,13 +1025,9 @@ def run_app():
     _init_state(st)
     inject_css(st)
 
-    # Sidebar
     sidebar_ui(st)
-
-    # Main content
     main_view(st)
 
-    # Bottom composer (always reachable; no scrolling)
     placeholder = "Type text to speak…" if st.session_state.mode == "Ongea" else "Batch mode: paste multiple lines (one per line)…"
     user_text = st.chat_input(placeholder)
 
@@ -1151,8 +1040,6 @@ def run_app():
             except Exception as e:
                 st.error(f"Could not generate speech: {e}")
                 st.exception(e)
-        else:
-            st.warning("Type something first.")
 
 # =========================
 # ENTRYPOINT
