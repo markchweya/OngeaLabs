@@ -1,12 +1,13 @@
 # app.py
 """
-ONGEA LABS v8.12.25 — Modern Glass TTS Studio (Light + Dark) • Ongea/Batch Toggle • Sidebar History (Menu Toggle)
-- Clean, modern UI (mobile-style glass) with big text area + settings on the side
-- Ongea/Batch toggled (no tabs), no Demo/Clear buttons
-- One Menu dropdown (top-right) controls: Studio / Fine-tune / About / Theme / Sidebar
-- Fixes duplicate slider IDs (unique keys) + removes stray st.code HTML blocks (and hard-hides code blocks just in case)
-- Smaller Language / Voice inputs (styled)
-- Sidebar can be expanded even when empty (shows “No speech yet”)
+ONGEA LABS — ChatGPT-Style TTS Studio (Light + Dark)
+---------------------------------------------------
+What changed vs your previous UI:
+- ChatGPT-style layout: left sidebar chat list + main chat + bottom composer
+- Generate speech as "assistant messages" with audio + download
+- Supports Ongea (single clip) and Batch (one clip per line)
+- Light theme default + toggle Dark/Light
+- Keeps your existing TTS + training pipeline mostly intact
 
 Run:
     streamlit run app.py
@@ -27,9 +28,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 from datetime import datetime
+import html
 
 import numpy as np
-
 
 # =========================
 # PROJECT SETTINGS
@@ -64,7 +65,7 @@ LANGUAGES: Dict[str, str] = {
     "Taita (Kidawida / Dawida) — KE": "dav",
 }
 
-PROJECT_NAME = "ongea labs-v8-mms-tts-multi"
+PROJECT_NAME = "ongea-labs-chatgpt-ui"
 OUTPUT_DIR = Path("./outputs") / PROJECT_NAME
 CONVERTED_DIR = OUTPUT_DIR / "training_checkpoint_with_discriminator"
 FINETUNE_REPO = Path("./finetune-hf-vits")
@@ -85,6 +86,8 @@ SAVE_STEPS = 500
 LOWERCASE = True
 STRIP_PUNCT = False
 
+APP_OUTPUTS_DIR = OUTPUT_DIR / "app_outputs"
+APP_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # =========================
 # VOICE LIBRARY
@@ -112,7 +115,7 @@ VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
         "Ongea Labs Luo (Meta MMS Base)": "facebook/mms-tts-luo",
     },
     "kik": {"Ongea Labs Gikuyu (Meta MMS Base)": "facebook/mms-tts-kik"},
-    "mer": {"Ongea Labs Labs Ameru/Meru (Meta MMS Base)": "facebook/mms-tts-mer"},
+    "mer": {"Ongea Labs Ameru/Meru (Meta MMS Base)": "facebook/mms-tts-mer"},
     "kam": {"Ongea Labs Kamba (Meta MMS Base)": "facebook/mms-tts-kam"},
     "guz": {"Ongea Labs Ekegusii/Kisii (Meta MMS Base)": "facebook/mms-tts-guz"},
     "luy": {"Ongea Labs Luhya (Meta MMS Base)": "facebook/mms-tts-luy"},
@@ -120,7 +123,6 @@ VOICE_LIBRARY_BY_LANG: Dict[str, Dict[str, str]] = {
     "mas": {"Ongea Labs Maasai (Meta MMS Base)": "facebook/mms-tts-mas"},
     "dav": {"Ongea Labs Taita/Dawida (Meta MMS Base)": "facebook/mms-tts-dav"},
 }
-
 
 # =========================
 # UTILITIES
@@ -146,7 +148,6 @@ def clean_text(t: str) -> str:
         t = re.sub(r"[^\w\s']", "", t)
     return t
 
-
 # =========================
 # TRAINING (lazy imports)
 # =========================
@@ -158,11 +159,13 @@ def detect_columns(ds) -> Tuple[str, str]:
     if audio_col is None:
         for c in cols:
             if "audio" in c or "speech" in c or "wav" in c:
-                audio_col = c; break
+                audio_col = c
+                break
     if text_col is None:
         for c in cols:
             if "text" in c or "transcript" in c or "sentence" in c:
-                text_col = c; break
+                text_col = c
+                break
     if audio_col is None or text_col is None:
         raise ValueError(f"Could not auto-detect columns. Found: {cols}")
     return audio_col, text_col
@@ -172,12 +175,14 @@ def load_and_prepare_dataset() -> Tuple[Any, Optional[Any], str, str]:
     ds_train = load_dataset(HF_DATASET_NAME, HF_DATASET_CONFIG, split=TRAIN_SPLIT)
     ds_eval = load_dataset(HF_DATASET_NAME, HF_DATASET_CONFIG, split=EVAL_SPLIT) if EVAL_SPLIT else None
     audio_col, text_col = detect_columns(ds_train)
+
     ds_train = ds_train.cast_column(audio_col, Audio(sampling_rate=TARGET_SR))
     if ds_eval is not None:
         ds_eval = ds_eval.cast_column(audio_col, Audio(sampling_rate=TARGET_SR))
 
     def _norm(ex):
-        ex[text_col] = clean_text(ex[text_col]); return ex
+        ex[text_col] = clean_text(ex[text_col])
+        return ex
 
     ds_train = ds_train.map(_norm)
     if ds_eval is not None:
@@ -185,10 +190,13 @@ def load_and_prepare_dataset() -> Tuple[Any, Optional[Any], str, str]:
 
     def _keep(ex):
         a = ex[audio_col]
-        if a is None or a.get("array") is None: return False
+        if a is None or a.get("array") is None:
+            return False
         dur = len(a["array"]) / a["sampling_rate"]
-        if dur < MIN_AUDIO_SEC or dur > MAX_AUDIO_SEC: return False
-        if ex[text_col] is None or ex[text_col].strip() == "": return False
+        if dur < MIN_AUDIO_SEC or dur > MAX_AUDIO_SEC:
+            return False
+        if ex[text_col] is None or ex[text_col].strip() == "":
+            return False
         return True
 
     ds_train = ds_train.filter(_keep)
@@ -203,11 +211,17 @@ def maybe_convert_discriminator(lang_code: str) -> str:
         return str(lang_dir)
     ensure_repo()
     lang_dir.mkdir(parents=True, exist_ok=True)
-    run([
-        "python","convert_original_discriminator_checkpoint.py",
-        "--language_code", lang_code,
-        "--pytorch_dump_folder_path", str(lang_dir),
-    ], cwd=FINETUNE_REPO)
+    run(
+        [
+            "python",
+            "convert_original_discriminator_checkpoint.py",
+            "--language_code",
+            lang_code,
+            "--pytorch_dump_folder_path",
+            str(lang_dir),
+        ],
+        cwd=FINETUNE_REPO,
+    )
     return str(lang_dir)
 
 def build_finetune_config(model_path: str, audio_col: str, text_col: str, lang_code: str) -> Dict[str, Any]:
@@ -245,13 +259,14 @@ def launch_training(lang_code: str):
     model_path = maybe_convert_discriminator(lang_code)
     out_dir = OUTPUT_DIR / lang_code
     out_dir.mkdir(parents=True, exist_ok=True)
+
     cfg = build_finetune_config(model_path, audio_col, text_col, lang_code)
     cfg_path = out_dir / "finetune_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
     ensure_repo()
     train_script = FINETUNE_REPO / "run_vits_finetuning.py"
-    run(["accelerate","launch",str(train_script),"--config",str(cfg_path)], cwd=FINETUNE_REPO)
-
+    run(["accelerate", "launch", str(train_script), "--config", str(cfg_path)], cwd=FINETUNE_REPO)
 
 # =========================
 # TTS LOADING + SYNTHESIS
@@ -306,7 +321,8 @@ def _safe_load_hf_vits(model_id: str, lang_code: Optional[str] = None) -> VoiceB
         model = ModelClass.from_pretrained(model_id, low_cpu_mem_usage=False, device_map=None)
         if any(getattr(p, "is_meta", False) for p in model.parameters()):
             raise RuntimeError("Model loaded with meta tensors.")
-        model.to("cpu"); model.eval()
+        model.to("cpu")
+        model.eval()
         return VoiceBundle(engine="hf_vits", processor=processor, model=model,
                            sr=getattr(processor, "sampling_rate", TARGET_SR),
                            model_id=model_id, lang_code=lang_code or "")
@@ -320,7 +336,8 @@ def _safe_load_hf_vits(model_id: str, lang_code: Optional[str] = None) -> VoiceB
             model = ModelClass.from_pretrained(BASE_MMS_REPO, subfolder=sub, low_cpu_mem_usage=False, device_map=None)
             if any(getattr(p, "is_meta", False) for p in model.parameters()):
                 raise RuntimeError("Model loaded with meta tensors.")
-            model.to("cpu"); model.eval()
+            model.to("cpu")
+            model.eval()
             return VoiceBundle(engine="hf_vits", processor=processor, model=model,
                                sr=getattr(processor, "sampling_rate", TARGET_SR),
                                model_id=model_id, lang_code=lang_code)
@@ -344,7 +361,7 @@ def _safe_load_coqui_hf(model_id: str) -> VoiceBundle:
     config_path = str(cfgs[0])
 
     ckpts = []
-    for ext in ("*.pth","*.pt","*.bin","*.safetensors"):
+    for ext in ("*.pth", "*.pt", "*.bin", "*.safetensors"):
         ckpts += list(local_dir.rglob(ext))
     ckpts = [p for p in ckpts if p.is_file()]
     if not ckpts:
@@ -380,7 +397,6 @@ def _to_1d_float32(audio) -> np.ndarray:
     return audio
 
 def synthesize_raw(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
-    import numpy as np
     text = clean_text(text)
     if not text:
         raise ValueError("Empty text.")
@@ -395,11 +411,13 @@ def synthesize_raw(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
         if audio.size == 0:
             raise ValueError("Coqui returned empty audio.")
         m = float(np.max(np.abs(audio)))
-        if m > 1.0: audio = audio / m
+        if m > 1.0:
+            audio = audio / m
         return np.clip(audio, -1.0, 1.0), sr
 
     processor, model = bundle.processor, bundle.model
     inputs = _encode_inputs(processor, text)
+
     import torch
     with torch.no_grad():
         out = model(**inputs)
@@ -411,7 +429,8 @@ def synthesize_raw(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
     if audio.size == 0:
         raise ValueError("Model returned empty audio.")
     m = float(np.max(np.abs(audio)))
-    if m > 1.0: audio = audio / m
+    if m > 1.0:
+        audio = audio / m
     return np.clip(audio, -1.0, 1.0), sr
 
 def split_by_punctuation(text: str) -> List[Tuple[str, str]]:
@@ -433,7 +452,7 @@ def synthesize_human(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
         raise ValueError("Empty text.")
     audios = []
     sr_final = bundle.sr or TARGET_SR
-    pause = {",":0.18, ";":0.22, ":":0.22, ".":0.38, "!":0.42, "?":0.42, "…":0.55}
+    pause = {",": 0.18, ";": 0.22, ":": 0.22, ".": 0.38, "!": 0.42, "?": 0.42, "…": 0.55}
 
     for chunk_text, punct in chunks:
         a, sr = synthesize_raw(bundle, chunk_text)
@@ -445,7 +464,8 @@ def synthesize_human(bundle: VoiceBundle, text: str) -> Tuple[np.ndarray, int]:
 
     audio = np.concatenate(audios) if len(audios) > 1 else audios[0]
     m = float(np.max(np.abs(audio))) if audio.size else 1.0
-    if m > 1.0: audio = audio / m
+    if m > 1.0:
+        audio = audio / m
     return np.clip(audio, -1.0, 1.0), sr_final
 
 def apply_tone(audio: np.ndarray, sr: int, speed: float, pitch_semitones: float) -> np.ndarray:
@@ -457,7 +477,8 @@ def apply_tone(audio: np.ndarray, sr: int, speed: float, pitch_semitones: float)
         if pitch_semitones != 0.0:
             y = librosa.effects.pitch_shift(y, sr=sr, n_steps=pitch_semitones)
         m = float(np.max(np.abs(y))) if y.size else 1.0
-        if m > 1.0: y = y / m
+        if m > 1.0:
+            y = y / m
         return np.clip(y, -1.0, 1.0)
     except Exception:
         return audio
@@ -467,18 +488,15 @@ def write_wav(path: Path, audio: np.ndarray, sr: int):
     path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(path), audio, sr, subtype="PCM_16", format="WAV")
 
-
 # =========================
-# STREAMLIT UI (Modern Glass)
+# APP STATE + HELPERS
 # =========================
 
 def _init_state(st):
-    if "view" not in st.session_state:
-        st.session_state.view = "studio"  # studio | finetune | about
     if "theme" not in st.session_state:
         st.session_state.theme = "light"  # light | dark
-    if "sidebar_open" not in st.session_state:
-        st.session_state.sidebar_open = False
+    if "view" not in st.session_state:
+        st.session_state.view = "studio"  # studio | finetune | about
 
     if "lang_name" not in st.session_state:
         st.session_state.lang_name = list(LANGUAGES.keys())[0]
@@ -486,22 +504,41 @@ def _init_state(st):
         st.session_state.voice_name = None
 
     if "mode" not in st.session_state:
-        st.session_state.mode = "Ongea"  # Speak | Batch
-
-    if "speak_text" not in st.session_state:
-        st.session_state.speak_text = ""
-    if "batch_lines" not in st.session_state:
-        st.session_state.batch_lines = ""
+        st.session_state.mode = "Ongea"  # Ongea | Batch
 
     if "speed" not in st.session_state:
         st.session_state.speed = 1.0
     if "pitch" not in st.session_state:
         st.session_state.pitch = 0.0
 
-    if "history" not in st.session_state:
-        st.session_state.history = []
-    if "latest_idx" not in st.session_state:
-        st.session_state.latest_idx = None
+    # Chat sessions (like ChatGPT)
+    if "chats" not in st.session_state:
+        st.session_state.chats = {}  # chat_id -> {title, created, messages[]}
+    if "chat_order" not in st.session_state:
+        st.session_state.chat_order = []  # newest first
+    if "current_chat_id" not in st.session_state:
+        cid = _create_new_chat(st, title="New chat")
+        st.session_state.current_chat_id = cid
+
+def _create_new_chat(st, title="New chat") -> str:
+    chat_id = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    st.session_state.chats[chat_id] = {
+        "title": title,
+        "created": datetime.now().isoformat(),
+        "messages": [],  # each: {id, role, kind, text?, wav_path?, meta?}
+    }
+    st.session_state.chat_order.insert(0, chat_id)
+    return chat_id
+
+def _set_chat_title_from_text(st, chat_id: str, text: str):
+    text = (text or "").strip()
+    if not text:
+        return
+    title = text.replace("\n", " ").strip()
+    if len(title) > 34:
+        title = title[:34].rstrip() + "…"
+    if st.session_state.chats[chat_id]["title"] == "New chat":
+        st.session_state.chats[chat_id]["title"] = title
 
 def get_voices_for(lang_code: str, lang_name: str):
     voices = VOICE_LIBRARY_BY_LANG.get(lang_code, {})
@@ -509,696 +546,490 @@ def get_voices_for(lang_code: str, lang_name: str):
         voices = {f"Ongea Labs {lang_name.split('—')[0].strip()} (Meta MMS Base)": f"facebook/mms-tts-{lang_code}"}
     return voices
 
-def get_voice_loader():
-    import streamlit as st
+def get_voice_loader(st):
     @st.cache_resource(show_spinner=False)
     def load_voice(model_id: str, lang_code: str):
         return _safe_load_model(model_id, lang_code=lang_code)
     return load_voice
 
-def show_overlay(st, text="Crafting voice..."):
-    ph = st.empty()
-    ph.markdown(
+def _next_clip_path(lang_code: str) -> Path:
+    # safe unique name
+    return APP_OUTPUTS_DIR / f"{lang_code}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.wav"
+
+# =========================
+# STYLING (ChatGPT-like)
+# =========================
+
+def inject_css(st, theme: str):
+    # Streamlit chrome off
+    # NOTE: do NOT hide sidebar; we use it as ChatGPT nav.
+    st.markdown(
         f"""
-<div class="oge-overlay">
-  <div class="oge-overlay-card">
-    <div class="oge-dots"><span></span><span></span><span></span></div>
-    <div class="oge-overlay-txt">{text}</div>
-  </div>
-</div>
-        """,
-        unsafe_allow_html=True
-    )
-    return ph
-
-def hide_overlay(ph):
-    try:
-        ph.empty()
-    except Exception:
-        pass
-
-def inject_css(st, theme: str, sidebar_open: bool):
-    # Hide ALL code blocks (kills the stray <div class="oge-brand"> snippet if anything outputs it)
-    sidebar_css = ""
-    if not sidebar_open:
-        sidebar_css = """
 <style>
-  [data-testid="stSidebar"]{transform: translateX(-110%) !important; width:0 !important; min-width:0 !important;}
-</style>
-"""
-
-    st.markdown(f"""
-<style>
-/* ---- Streamlit chrome off ---- */
 #MainMenu, footer, header {{visibility:hidden;}}
 [data-testid="stToolbar"]{{display:none !important;}}
 [data-testid="stStatusWidget"]{{display:none !important;}}
 [data-testid="stHeader"]{{display:none !important;}}
 [data-testid="stDecoration"]{{display:none !important;}}
 
-/* HARD KILL CODE BLOCKS (fix stray debug) */
-[data-testid="stCodeBlock"]{{display:none !important;}}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
-
-:root{{
-  --radius: 22px;
-  --radius2: 18px;
-  --shadow: 0 22px 60px rgba(12, 24, 48, 0.12);
-  --shadow2: 0 12px 28px rgba(12, 24, 48, 0.10);
+:root {{
+  --radius: 18px;
+  --radius2: 14px;
+  --shadow: 0 18px 50px rgba(12, 24, 48, 0.12);
+  --shadow2: 0 10px 24px rgba(12, 24, 48, 0.10);
   --stroke: rgba(255,255,255,0.55);
-  --stroke2: rgba(14, 20, 40, 0.10);
 
-  --accent1: #19b6ad; /* teal */
-  --accent2: #6b66ff; /* indigo */
-  --accent3: #ff4d7d; /* pink */
-  --ok: #14b8a6;
-  --warn: #f59e0b;
+  --teal: #19b6ad;
+  --indigo: #6b66ff;
+  --pink: #ff4d7d;
 
-  --font: "Plus Jakarta Sans", Inter, system-ui, -apple-system, Segoe UI, Roboto;
-  --font2: Inter, system-ui, -apple-system, Segoe UI;
+  --font: Inter, system-ui, -apple-system, Segoe UI, Roboto;
 }}
 
-{"/* LIGHT THEME */" if theme=="light" else "/* DARK THEME */"}
-:root{{
-  --bgA: {"#dff7fb" if theme=="light" else "#050814"};
-  --bgB: {"#eef4ff" if theme=="light" else "#0b1633"};
-  --bgC: {"#f6ecff" if theme=="light" else "#052f2a"};
+{"/* LIGHT */" if theme=="light" else "/* DARK */"}
+:root {{
+  --bgA: {"#e9fbff" if theme=="light" else "#050814"};
+  --bgB: {"#f1f5ff" if theme=="light" else "#0b1633"};
+  --bgC: {"#fbf2ff" if theme=="light" else "#052f2a"};
 
-  --card: {"rgba(255,255,255,0.66)" if theme=="light" else "rgba(12,16,32,0.62)"};
-  --card2: {"rgba(255,255,255,0.80)" if theme=="light" else "rgba(12,16,32,0.78)"};
-  --input: {"rgba(255,255,255,0.86)" if theme=="light" else "rgba(10,12,24,0.78)"};
+  --card: {"rgba(255,255,255,0.72)" if theme=="light" else "rgba(12,16,32,0.70)"};
+  --card2: {"rgba(255,255,255,0.86)" if theme=="light" else "rgba(12,16,32,0.82)"};
+  --input: {"rgba(255,255,255,0.92)" if theme=="light" else "rgba(10,12,24,0.82)"};
 
   --text: {"#0b1220" if theme=="light" else "#eaf2ff"};
   --muted: {"rgba(11,18,32,0.62)" if theme=="light" else "rgba(234,242,255,0.70)"};
   --soft: {"rgba(11,18,32,0.10)" if theme=="light" else "rgba(234,242,255,0.10)"};
   --soft2: {"rgba(11,18,32,0.14)" if theme=="light" else "rgba(234,242,255,0.14)"};
+
+  --sidebar: {"rgba(255,255,255,0.65)" if theme=="light" else "rgba(10,12,24,0.78)"};
 }}
 
 html, body {{
   font-family: var(--font) !important;
   color: var(--text) !important;
-  background: transparent !important;
 }}
 
-[data-testid="stAppViewContainer"]{{
+[data-testid="stAppViewContainer"] {{
   background:
-    radial-gradient(1200px 700px at 10% 0%, rgba(25,182,173,{"0.35" if theme=="light" else "0.22"}) 0%, transparent 55%),
-    radial-gradient(1000px 650px at 92% 5%, rgba(107,102,255,{"0.32" if theme=="light" else "0.18"}) 0%, transparent 55%),
-    radial-gradient(900px 700px at 70% 90%, rgba(255,77,125,{"0.20" if theme=="light" else "0.10"}) 0%, transparent 55%),
+    radial-gradient(1200px 700px at 10% 0%, rgba(25,182,173,{"0.25" if theme=="light" else "0.16"}) 0%, transparent 55%),
+    radial-gradient(1000px 650px at 92% 5%, rgba(107,102,255,{"0.22" if theme=="light" else "0.14"}) 0%, transparent 55%),
+    radial-gradient(900px 700px at 70% 90%, rgba(255,77,125,{"0.14" if theme=="light" else "0.08"}) 0%, transparent 55%),
     linear-gradient(135deg, var(--bgA), var(--bgB), var(--bgC)) !important;
 }}
 
-.block-container{{
-  max-width: 1280px;
-  padding: 1.25rem 1.2rem 1.4rem 1.2rem !important;
+.block-container {{
+  max-width: 980px;
+  padding-top: 1.15rem !important;
+  padding-bottom: 2.0rem !important;
 }}
 
-[data-testid="stSidebar"] > div{{
-  background: var(--card2) !important;
-  backdrop-filter: blur(14px);
+[data-testid="stSidebar"] > div {{
+  background: var(--sidebar) !important;
   border-right: 1px solid var(--soft) !important;
-}}
-/* sidebar scroll allowed */
-[data-testid="stSidebar"]{{height:100vh !important;}}
-[data-testid="stSidebar"] > div{{height:100vh !important; overflow:auto !important;}}
-
-/* ---- Typography ---- */
-h1,h2,h3,h4,h5,h6,p,span,div{{ color: var(--text) !important; }}
-.oge-muted{{ color: var(--muted) !important; }}
-
-/* ---- Cards ---- */
-.oge-card{{
-  background: var(--card);
-  border: 1px solid var(--soft);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
 }}
-.oge-card2{{
-  background: var(--card2);
-  border: 1px solid var(--soft);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow2);
-  backdrop-filter: blur(14px);
-}}
-.oge-pad{{ padding: 1.1rem 1.1rem; }}
 
-/* ---- Header ---- */
-.oge-header{{
-  display:flex; align-items:center; justify-content:space-between;
-  gap: 1rem;
-  margin-bottom: 1.0rem;
-}}
-.oge-brand{{
-  display:flex; align-items:center; gap: 0.9rem;
-}}
-.oge-logo{{
-  width: 52px; height: 52px; border-radius: 18px;
-  background: linear-gradient(135deg, rgba(25,182,173,0.35), rgba(107,102,255,0.25));
-  border: 1px solid var(--soft);
-  display:flex; align-items:center; justify-content:center;
-  box-shadow: var(--shadow2);
-}}
-.oge-title{{
-  font-size: 2.1rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.0;
-}}
-.oge-sub{{
-  font-family: var(--font2);
-  font-size: 0.98rem;
-  margin-top: 0.2rem;
-  color: var(--muted);
-}}
+h1,h2,h3,h4,h5,h6,p,span,div {{ color: var(--text) !important; }}
+.oge-muted {{ color: var(--muted) !important; }}
 
-.oge-menu-btn .stButton>button{{
-  border-radius: 999px !important;
-  border: 1px solid var(--soft) !important;
-  background: var(--card2) !important;
-  padding: 0.55rem 1.0rem !important;
-  font-weight: 800 !important;
-  box-shadow: var(--shadow2);
-}}
-.oge-menu-btn .stButton>button:hover{{ transform: translateY(-1px); }}
-
-/* ---- Inputs (smaller selectboxes) ---- */
-label{{ font-family: var(--font2) !important; font-weight: 700 !important; }}
-div[data-baseweb="select"] > div{{
-  background: var(--input) !important;
-  border: 1px solid var(--soft2) !important;
-  border-radius: 16px !important;
-  min-height: 44px !important;
-}}
-div[data-baseweb="select"] span, div[data-baseweb="select"] input{{
-  color: var(--text) !important;
-  font-weight: 650 !important;
-}}
-textarea{{
-  background: var(--input) !important;
-  border: 1px solid var(--soft2) !important;
-  border-radius: 18px !important;
-  color: var(--text) !important;
-  font-size: 1.02rem !important;
-  line-height: 1.35 !important;
-}}
-/* placeholder contrast */
-textarea::placeholder{{ color: rgba(120,130,150,0.70) !important; }}
-
-/* ---- Toggle (Speak/Batch) ---- */
-.oge-toggle-wrap{{
-  background: var(--card2);
-  border: 1px solid var(--soft);
-  border-radius: 999px;
-  padding: 0.25rem;
-  display:inline-flex;
-  gap: 0.25rem;
-  box-shadow: var(--shadow2);
-}}
-/* style streamlit radio group as pills */
-div[role="radiogroup"]{{ gap: 0.35rem !important; }}
-div[role="radiogroup"] > label{{
-  background: transparent !important;
-  border-radius: 999px !important;
-  padding: 0.35rem 0.8rem !important;
-  border: 1px solid transparent !important;
-}}
-div[role="radiogroup"] > label:hover{{ background: rgba(25,182,173,0.10) !important; }}
-/* hide the actual circle */
-div[role="radiogroup"] > label input{{ display:none !important; }}
-/* selected pill */
-div[role="radiogroup"] > label:has(input:checked){{
-  background: linear-gradient(135deg, rgba(25,182,173,0.22), rgba(107,102,255,0.16)) !important;
-  border: 1px solid rgba(25,182,173,0.40) !important;
-}}
-div[role="radiogroup"] > label span{{ font-weight: 850 !important; }}
-
-/* ---- Buttons ---- */
-.stButton>button{{
+/* Buttons */
+.stButton>button {{
   border-radius: 999px !important;
   border: 1px solid rgba(25,182,173,0.45) !important;
   background: linear-gradient(135deg, rgba(25,182,173,0.22), rgba(107,102,255,0.16)) !important;
-  padding: 0.7rem 1.05rem !important;
-  font-weight: 900 !important;
+  padding: 0.62rem 0.95rem !important;
+  font-weight: 800 !important;
   box-shadow: var(--shadow2);
 }}
-.stButton>button:hover{{ transform: translateY(-1px) scale(1.01); }}
+.stButton>button:hover {{ transform: translateY(-1px); }}
 
-/* ---- Sliders ---- */
-[data-testid="stSlider"] > div{{ padding-top: 0.2rem; }}
-/* audio player */
+/* Inputs */
+div[data-baseweb="select"] > div {{
+  background: var(--input) !important;
+  border: 1px solid var(--soft2) !important;
+  border-radius: 14px !important;
+  min-height: 42px !important;
+}}
+textarea {{
+  background: var(--input) !important;
+  border: 1px solid var(--soft2) !important;
+  border-radius: 16px !important;
+  color: var(--text) !important;
+  font-size: 1.02rem !important;
+  line-height: 1.38 !important;
+}}
+textarea::placeholder {{ color: rgba(120,130,150,0.72) !important; }}
+
+/* Chat bubbles (we render our own divs) */
+.oge-bubble {{
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--soft);
+  box-shadow: var(--shadow2);
+  backdrop-filter: blur(12px);
+  margin: 0.25rem 0 0.25rem 0;
+}}
+.oge-assistant {{
+  background: var(--card);
+}}
+.oge-user {{
+  background: linear-gradient(135deg, rgba(25,182,173,0.20), rgba(107,102,255,0.12));
+  border: 1px solid rgba(25,182,173,0.25);
+}}
+.oge-meta {{
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+}}
+
 audio {{
   width: 100% !important;
   border-radius: 999px !important;
 }}
-
-/* ---- Overlay ---- */
-.oge-overlay{{
-  position: fixed; inset: 0;
-  display:flex; align-items:flex-end; justify-content:flex-end;
-  padding: 1.2rem;
-  z-index: 9999;
-}}
-.oge-overlay-card{{
-  background: var(--card2);
-  border: 1px solid var(--soft);
-  border-radius: 18px;
-  padding: 0.85rem 0.95rem;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(14px);
-  width: 280px;
-}}
-.oge-dots{{ display:flex; gap:8px; margin-bottom: 0.4rem; }}
-.oge-dots span{{
-  width: 8px; height: 8px; border-radius: 999px;
-  background: rgba(25,182,173,0.9);
-  animation: oge-bounce 0.8s infinite ease-in-out;
-}}
-.oge-dots span:nth-child(2){{ animation-delay: 0.12s; background: rgba(107,102,255,0.85); }}
-.oge-dots span:nth-child(3){{ animation-delay: 0.24s; background: rgba(255,77,125,0.75); }}
-@keyframes oge-bounce{{ 0%,100%{{ transform: translateY(0); opacity:.65; }} 50%{{ transform: translateY(-6px); opacity:1; }} }}
-.oge-overlay-txt{{ color: var(--muted); font-weight: 700; }}
-
-/* spacing fixes: remove big empty gaps from markdown */
-[data-testid="stMarkdownContainer"] p{{ margin: 0.2rem 0 0.35rem 0; }}
-
 </style>
-{sidebar_css}
-""", unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
+# =========================
+# UI RENDERING
+# =========================
 
-def render_sidebar(st):
-    sb = st.sidebar
-    sb.markdown("<div style='padding:0.6rem 0.2rem;'><div style='font-weight:900;font-size:1.05rem;'>History</div><div style='color:rgba(90,100,120,0.75);font-size:0.9rem;margin-top:0.15rem;'>Your generated clips appear here.</div></div>", unsafe_allow_html=True)
-    sb.markdown("<div style='height:0.6rem;'></div>", unsafe_allow_html=True)
-
-    if not st.session_state.history:
-        sb.markdown("<div style='padding:0.9rem;border-radius:16px;border:1px solid rgba(0,0,0,0.06);background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);'>No speech yet.</div>", unsafe_allow_html=True)
-        sb.markdown("<div style='height:0.7rem;'></div>", unsafe_allow_html=True)
-        sb.markdown("<div style='padding:0.9rem;border-radius:16px;border:1px solid rgba(0,0,0,0.06);background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);'>Tip: Keep each sentence short for clean results.</div>", unsafe_allow_html=True)
-        return
-
-    for item in reversed(st.session_state.history[-30:]):
-        sb.markdown("<div style='padding:0.85rem;border-radius:16px;border:1px solid rgba(0,0,0,0.06);background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);margin-bottom:0.7rem;'>", unsafe_allow_html=True)
-        sb.markdown(
-            f"<div style='font-weight:900;margin-bottom:0.2rem;'>{item['label']}</div>"
-            f"<div style='color:rgba(90,100,120,0.75);font-size:0.86rem;margin-bottom:0.45rem;'>{item['ts']} • {item['voice_name']}</div>",
-            unsafe_allow_html=True
-        )
-        sb.audio(item["wav_path"], format="audio/wav")
-        sb.download_button(
-            "Download WAV",
-            data=Path(item["wav_path"]).read_bytes(),
-            file_name=Path(item["wav_path"]).name,
-            mime="audio/wav",
-            use_container_width=True,
-            key=f"sb_dl_{item['id']}"
-        )
-        sb.markdown("</div>", unsafe_allow_html=True)
-
-    if sb.button("🗑️ Clear history", use_container_width=True):
-        st.session_state.history = []
-        st.session_state.latest_idx = None
-        st.rerun()
-
-
-def header_bar(st):
-    # Left brand
-    st.markdown("""
-<div class="oge-header">
-  <div class="oge-brand">
-    <div class="oge-logo">🎙️</div>
-    <div>
-      <div class="oge-title">Ongea Labs</div>
-      <div class="oge-sub">African TTS Studio</div>
-    </div>
+def sidebar_nav(st):
+    with st.sidebar:
+        st.markdown(
+            """
+<div style="display:flex;align-items:center;gap:10px;padding:0.25rem 0.2rem 0.6rem 0.2rem;">
+  <div style="width:40px;height:40px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+              background:linear-gradient(135deg, rgba(25,182,173,0.26), rgba(107,102,255,0.18));
+              border:1px solid rgba(255,255,255,0.25); box-shadow:0 10px 24px rgba(0,0,0,0.10);">🎙️</div>
+  <div>
+    <div style="font-weight:900;font-size:1.05rem;line-height:1.0;">Ongea Labs</div>
+    <div style="font-size:0.85rem;opacity:0.75;">Chat TTS Studio</div>
   </div>
 </div>
-""", unsafe_allow_html=True)
-
-    # Right menu (popover)
-    cL, cR = st.columns([1, 0.33], gap="small")
-    with cR:
-        st.markdown('<div class="oge-menu-btn">', unsafe_allow_html=True)
-        pop = st.popover("☰ Menu")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with pop:
-        st.markdown("<div style='font-weight:900;font-size:1.02rem;margin-bottom:0.35rem;'>Ongea Labs Menu</div>", unsafe_allow_html=True)
-
-        view = st.radio(
-            "View",
-            ["studio", "finetune", "about"],
-            index=["studio","finetune","about"].index(st.session_state.view),
-            key="menu_view",
-            label_visibility="collapsed",
+            """,
+            unsafe_allow_html=True,
         )
-        st.session_state.view = view
 
-        st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
-
-        th = st.radio(
-            "Theme",
-            ["light", "dark"],
-            index=["light","dark"].index(st.session_state.theme),
-            key="menu_theme",
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        st.session_state.theme = th
-
-        st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
-
-        if st.button(("Hide sidebar" if st.session_state.sidebar_open else "Show sidebar"), use_container_width=True):
-            st.session_state.sidebar_open = not st.session_state.sidebar_open
+        if st.button("➕ New chat", use_container_width=True, key="btn_new_chat"):
+            new_id = _create_new_chat(st, title="New chat")
+            st.session_state.current_chat_id = new_id
             st.rerun()
 
+        st.markdown("<div style='height:0.35rem;'></div>", unsafe_allow_html=True)
+        q = st.text_input("Search chats", value="", key="chat_search", placeholder="Search…")
+        st.markdown("<div style='height:0.35rem;'></div>", unsafe_allow_html=True)
 
-def studio_top_controls(st):
-    lang_keys = list(LANGUAGES.keys())
+        # Build list
+        chat_ids = st.session_state.chat_order[:]
+        if q.strip():
+            qq = q.strip().lower()
+            chat_ids = [cid for cid in chat_ids if qq in st.session_state.chats[cid]["title"].lower()]
 
-    c1, c2 = st.columns([1, 1], gap="medium")
-    with c1:
-        st.markdown("<div style='font-weight:900;margin-bottom:0.25rem;'>Language</div>", unsafe_allow_html=True)
-        lang_name = st.selectbox(
-            "Language",
-            lang_keys,
-            index=lang_keys.index(st.session_state.lang_name),
-            key="lang_select",
-            label_visibility="collapsed",
-        )
-        st.session_state.lang_name = lang_name
+        if not chat_ids:
+            st.markdown("<div class='oge-muted' style='padding:0.35rem 0.2rem;'>No chats found.</div>", unsafe_allow_html=True)
+        else:
+            def _fmt(cid):
+                return st.session_state.chats[cid]["title"]
 
-    lang_code = LANGUAGES[st.session_state.lang_name]
-    voices = get_voices_for(lang_code, st.session_state.lang_name)
-    voice_names = list(voices.keys())
-
-    if st.session_state.voice_name not in voice_names:
-        st.session_state.voice_name = voice_names[0]
-
-    with c2:
-        st.markdown("<div style='font-weight:900;margin-bottom:0.25rem;'>Voice / Model</div>", unsafe_allow_html=True)
-        voice_name = st.selectbox(
-            "Voice / Model",
-            voice_names,
-            index=voice_names.index(st.session_state.voice_name),
-            key="voice_select",
-            label_visibility="collapsed",
-        )
-        st.session_state.voice_name = voice_name
-
-    # Ongea/Batch toggle
-    st.markdown("<div style='height:0.75rem;'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='oge-toggle-wrap'>", unsafe_allow_html=True)
-    mode = st.radio(
-        "Mode",
-        ["Ongea", "Batch"],
-        index=0 if st.session_state.mode == "Ongea" else 1,
-        key="mode_radio",
-        horizontal=True,
-        label_visibility="collapsed",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.session_state.mode = mode
-
-    return lang_code, voices
-
-
-def studio_layout(st, lang_code: str, voices: Dict[str, str]):
-    # Two-column layout: left big text, right settings
-    left, right = st.columns([2.25, 1.0], gap="large")
-
-    # Shared settings (single sliders => no duplicate ID errors)
-    # unique keys fixed:
-    with right:
-        st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-        st.markdown("<div style='font-weight:900;font-size:1.25rem;margin-bottom:0.15rem;'>Settings</div>", unsafe_allow_html=True)
-        st.markdown("<div class='oge-muted' style='font-size:0.95rem;margin-bottom:0.6rem;'>Tone + output controls</div>", unsafe_allow_html=True)
-
-        st.session_state.speed = st.slider(
-            "Speed",
-            0.75, 1.50,
-            float(st.session_state.speed),
-            0.05,
-            key="slider_speed_global",
-        )
-        st.session_state.pitch = st.slider(
-            "Pitch (semitones)",
-            -4.0, 4.0,
-            float(st.session_state.pitch),
-            0.5,
-            key="slider_pitch_global",
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("<div style='height:0.8rem;'></div>", unsafe_allow_html=True)
-
-    if st.session_state.mode == "Ongea":
-        with left:
-            st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-            st.markdown("<div style='font-weight:900;font-size:1.25rem;margin-bottom:0.2rem;'>Ongea</div>", unsafe_allow_html=True)
-            st.markdown("<div class='oge-muted' style='margin-bottom:0.75rem;'>Paste text → generate one clean clip.</div>", unsafe_allow_html=True)
-            txt = st.text_area(
-                "Text",
-                value=st.session_state.speak_text,
-                height=260,
-                placeholder="Example:\nHabari! Karibu kwenye Ongea Labs.\nAndika maandishi yako hapa…",
-                key="speak_text_area",
+            sel = st.radio(
+                "Chats",
+                chat_ids,
+                index=chat_ids.index(st.session_state.current_chat_id) if st.session_state.current_chat_id in chat_ids else 0,
+                format_func=_fmt,
                 label_visibility="collapsed",
+                key="chat_list_radio",
             )
-            st.session_state.speak_text = txt
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.session_state.current_chat_id = sel
 
-        with right:
-            btn = st.button("Generate speech", use_container_width=True, key="btn_generate_speak")
-            st.markdown("<div style='height:0.8rem;'></div>", unsafe_allow_html=True)
+        st.divider()
 
-            st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-            st.markdown("<div style='font-weight:900;font-size:1.15rem;margin-bottom:0.2rem;'>Latest</div>", unsafe_allow_html=True)
-            st.markdown("<div class='oge-muted' style='margin-bottom:0.6rem;'>Your most recent clip appears here.</div>", unsafe_allow_html=True)
+        st.session_state.view = st.radio(
+            "View",
+            ["studio", "finetune", "about"],
+            index=["studio", "finetune", "about"].index(st.session_state.view),
+            horizontal=False,
+            key="view_radio",
+        )
 
-            if st.session_state.latest_idx is not None:
-                it = st.session_state.history[st.session_state.latest_idx]
-                st.audio(it["wav_path"], format="audio/wav")
-                st.download_button(
-                    "Download WAV",
-                    data=Path(it["wav_path"]).read_bytes(),
-                    file_name=Path(it["wav_path"]).name,
-                    mime="audio/wav",
-                    use_container_width=True,
-                    key="latest_dl_btn",
+        st.divider()
+
+        # Theme toggle
+        theme_is_dark = (st.session_state.theme == "dark")
+        new_dark = st.toggle("Dark mode", value=theme_is_dark, key="toggle_dark")
+        st.session_state.theme = "dark" if new_dark else "light"
+
+        # Quick settings in sidebar (like ChatGPT “settings drawer”)
+        with st.expander("Voice & output settings", expanded=True):
+            lang_keys = list(LANGUAGES.keys())
+            st.session_state.lang_name = st.selectbox(
+                "Language",
+                lang_keys,
+                index=lang_keys.index(st.session_state.lang_name),
+                key="sb_lang",
+            )
+            lang_code = LANGUAGES[st.session_state.lang_name]
+            voices = get_voices_for(lang_code, st.session_state.lang_name)
+            voice_names = list(voices.keys())
+            if st.session_state.voice_name not in voice_names:
+                st.session_state.voice_name = voice_names[0]
+
+            st.session_state.voice_name = st.selectbox(
+                "Voice / Model",
+                voice_names,
+                index=voice_names.index(st.session_state.voice_name),
+                key="sb_voice",
+            )
+
+            st.session_state.mode = st.radio(
+                "Mode",
+                ["Ongea", "Batch"],
+                index=0 if st.session_state.mode == "Ongea" else 1,
+                horizontal=True,
+                key="sb_mode",
+            )
+
+            st.session_state.speed = st.slider("Speed", 0.75, 1.50, float(st.session_state.speed), 0.05, key="sb_speed")
+            st.session_state.pitch = st.slider("Pitch (semitones)", -4.0, 4.0, float(st.session_state.pitch), 0.5, key="sb_pitch")
+
+        st.markdown("<div style='height:0.4rem;'></div>", unsafe_allow_html=True)
+
+        # Clear current chat
+        if st.button("🗑️ Clear this chat", use_container_width=True, key="btn_clear_chat"):
+            cid = st.session_state.current_chat_id
+            if cid in st.session_state.chats:
+                st.session_state.chats[cid]["messages"] = []
+                st.session_state.chats[cid]["title"] = "New chat"
+            st.rerun()
+
+def render_topbar(st):
+    cid = st.session_state.current_chat_id
+    title = st.session_state.chats.get(cid, {}).get("title", "Chat")
+    st.markdown(
+        f"""
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:0.65rem;">
+  <div>
+    <div style="font-weight:900;font-size:1.35rem;letter-spacing:-0.01em;">{html.escape(title)}</div>
+    <div class="oge-muted" style="font-size:0.92rem;margin-top:0.15rem;">Type text → get natural speech audio.</div>
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def _append_message(st, chat_id: str, role: str, kind: str, text: str = "", wav_path: str = "", meta: dict = None):
+    meta = meta or {}
+    mid = f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+    st.session_state.chats[chat_id]["messages"].append({
+        "id": mid,
+        "role": role,   # "user" | "assistant"
+        "kind": kind,   # "text" | "audio"
+        "text": text,
+        "wav_path": wav_path,
+        "meta": meta,
+        "ts": datetime.now().strftime("%H:%M:%S"),
+    })
+    return mid
+
+def render_chat_thread(st):
+    cid = st.session_state.current_chat_id
+    chat = st.session_state.chats.get(cid)
+    if not chat:
+        return
+
+    messages = chat["messages"]
+    if not messages:
+        st.markdown(
+            """
+<div class="oge-bubble oge-assistant">
+  <div style="font-weight:800;">Where should we begin?</div>
+  <div class="oge-muted" style="margin-top:0.25rem;">
+    Paste or type something in the box below. I’ll generate a clean voice clip.
+  </div>
+  <div class="oge-meta">Tip: For best results, keep sentences short and use punctuation.</div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    for m in messages:
+        if m["role"] == "user":
+            st.markdown(
+                f"<div class='oge-bubble oge-user'>{html.escape(m.get('text',''))}</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            # assistant
+            if m["kind"] == "text":
+                st.markdown(
+                    f"<div class='oge-bubble oge-assistant'>{html.escape(m.get('text',''))}</div>",
+                    unsafe_allow_html=True,
                 )
             else:
-                st.markdown("<div class='oge-muted'>Nothing yet.</div>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        if btn:
-            _do_generate_speak(st, lang_code, voices)
-
-    else:
-        with left:
-            st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-            st.markdown("<div style='font-weight:900;font-size:1.25rem;margin-bottom:0.2rem;'>Batch Studio</div>", unsafe_allow_html=True)
-            st.markdown("<div class='oge-muted' style='margin-bottom:0.75rem;'>One line = one clip. Paste everything here.</div>", unsafe_allow_html=True)
-            lines = st.text_area(
-                "Lines",
-                value=st.session_state.batch_lines,
-                height=310,
-                placeholder="Line 1: Habari! Karibu kwenye Ongea.\nLine 2: Leo tutaongea kuhusu...\nLine 3: Asante kwa kusikiliza.",
-                key="batch_lines_area",
-                label_visibility="collapsed",
-            )
-            st.session_state.batch_lines = lines
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with right:
-            btn = st.button("Generate batch", use_container_width=True, key="btn_generate_batch")
-            st.markdown("<div style='height:0.8rem;'></div>", unsafe_allow_html=True)
-
-            st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-            st.markdown("<div style='font-weight:900;font-size:1.05rem;margin-bottom:0.25rem;'>Tips</div>", unsafe_allow_html=True)
-            st.markdown("""
-<div class="oge-muted" style="line-height:1.35;">
-• Keep each line short (best quality)<br/>
-• Use punctuation for natural pauses<br/>
-• Batch outputs are saved as WAV<br/>
+                meta = m.get("meta", {})
+                label = meta.get("label", "Audio")
+                voice = meta.get("voice_name", "")
+                lang = meta.get("lang_code", "")
+                st.markdown(
+                    f"""
+<div class="oge-bubble oge-assistant">
+  <div style="font-weight:800;">{html.escape(label)}</div>
+  <div class="oge-meta">{html.escape(m.get("ts",""))} • {html.escape(lang)} • {html.escape(voice)}</div>
 </div>
-""", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        if btn:
-            _do_generate_batch(st, lang_code, voices)
-
-        # show last few generated batch clips inline (nice)
-        if st.session_state.history:
-            st.markdown("<div style='height:1.0rem;'></div>", unsafe_allow_html=True)
-            st.markdown("<div style='font-weight:900;font-size:1.1rem;margin-bottom:0.4rem;'>Recent clips</div>", unsafe_allow_html=True)
-            cols = st.columns(3, gap="medium")
-            recent = list(reversed(st.session_state.history[-6:]))
-            for i, it in enumerate(recent):
-                with cols[i % 3]:
-                    st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-weight:900;margin-bottom:0.3rem;'>{it['label']}</div>", unsafe_allow_html=True)
-                    st.audio(it["wav_path"], format="audio/wav")
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.audio(m["wav_path"], format="audio/wav")
+                try:
+                    data = Path(m["wav_path"]).read_bytes()
                     st.download_button(
-                        "Download",
-                        data=Path(it["wav_path"]).read_bytes(),
-                        file_name=Path(it["wav_path"]).name,
+                        "Download WAV",
+                        data=data,
+                        file_name=Path(m["wav_path"]).name,
                         mime="audio/wav",
-                        use_container_width=True,
-                        key=f"recent_dl_{it['id']}",
+                        use_container_width=False,
+                        key=f"dl_{m['id']}",
                     )
-                    st.markdown("</div>", unsafe_allow_html=True)
+                except Exception:
+                    st.caption("Could not load file for download (missing path).")
 
+def do_generate_from_text(st, text: str):
+    cid = st.session_state.current_chat_id
+    if cid not in st.session_state.chats:
+        return
 
-def _do_generate_speak(st, lang_code: str, voices: Dict[str, str]):
+    text = (text or "").strip()
+    if not text:
+        return
+
+    # set title if new
+    _set_chat_title_from_text(st, cid, text)
+
+    # add user message
+    _append_message(st, cid, role="user", kind="text", text=text)
+
+    # resolve voice settings
+    lang_code = LANGUAGES[st.session_state.lang_name]
+    voices = get_voices_for(lang_code, st.session_state.lang_name)
+    voice_name = st.session_state.voice_name or list(voices.keys())[0]
+    model_id = voices[voice_name]
+
+    load_voice = get_voice_loader(st)
+
+    # generate
     try:
-        text = st.session_state.speak_text.strip()
-        if not text:
-            st.warning("Paste some text first.")
-            return
+        with st.spinner("Loading voice model…"):
+            bundle = load_voice(model_id, lang_code)
 
-        voice_name = st.session_state.voice_name
-        model_id = voices[voice_name]
-        load_voice = get_voice_loader()
+        mode = st.session_state.mode
+        speed = float(st.session_state.speed)
+        pitch = float(st.session_state.pitch)
 
-        overlay = show_overlay(st, "Loading voice model…")
-        bundle = load_voice(model_id, lang_code)
-        hide_overlay(overlay)
+        if mode == "Ongea":
+            with st.spinner("Generating speech…"):
+                audio, sr = synthesize_human(bundle, text)
+                audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
+                out = _next_clip_path(lang_code)
+                write_wav(out, audio, sr)
 
-        overlay = show_overlay(st, "Generating speech…")
-        audio, sr = synthesize_human(bundle, text)
-        audio = apply_tone(audio, sr, speed=st.session_state.speed, pitch_semitones=st.session_state.pitch)
+            _append_message(
+                st, cid, role="assistant", kind="audio",
+                wav_path=str(out),
+                meta={"label": "Ongea", "voice_name": voice_name, "lang_code": lang_code, "sr": sr},
+            )
 
-        out_wav = OUTPUT_DIR / "app_outputs" / f"{lang_code}_speech_{len(st.session_state.history)+1:03d}.wav"
-        write_wav(out_wav, audio, sr)
-        hide_overlay(overlay)
+        else:
+            # Batch: one line = one clip
+            lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            if not lines:
+                _append_message(st, cid, role="assistant", kind="text", text="Batch mode needs at least one non-empty line.")
+                return
 
-        item = {
-            "id": f"{lang_code}_s_{len(st.session_state.history)+1:03d}",
-            "ts": datetime.now().strftime("%H:%M:%S"),
-            "lang_code": lang_code,
-            "voice_name": voice_name,
-            "label": "Ongea",
-            "wav_path": str(out_wav),
-            "sr": sr,
-        }
-        st.session_state.history.append(item)
-        st.session_state.latest_idx = len(st.session_state.history) - 1
-        st.rerun()
+            with st.spinner(f"Generating batch ({len(lines)} lines)…"):
+                for i, ln in enumerate(lines, start=1):
+                    audio, sr = synthesize_human(bundle, ln)
+                    audio = apply_tone(audio, sr, speed=speed, pitch_semitones=pitch)
+                    out = _next_clip_path(lang_code)
+                    write_wav(out, audio, sr)
+
+                    _append_message(
+                        st, cid, role="assistant", kind="audio",
+                        wav_path=str(out),
+                        meta={"label": f"Batch • Line {i}", "voice_name": voice_name, "lang_code": lang_code, "sr": sr},
+                    )
 
     except Exception as e:
-        try:
-            hide_overlay(overlay)
-        except Exception:
-            pass
-        st.error(f"Could not generate speech: {e}")
-        st.exception(e)
+        _append_message(st, cid, role="assistant", kind="text", text=f"Could not generate speech: {e}")
 
-def _do_generate_batch(st, lang_code: str, voices: Dict[str, str]):
-    try:
-        raw = st.session_state.batch_lines
-        lines = [l.strip() for l in raw.split("\n") if l.strip()]
-        if not lines:
-            st.warning("Paste one sentence per line first.")
-            return
-
-        voice_name = st.session_state.voice_name
-        model_id = voices[voice_name]
-        load_voice = get_voice_loader()
-
-        overlay = show_overlay(st, "Loading voice model…")
-        bundle = load_voice(model_id, lang_code)
-        hide_overlay(overlay)
-
-        overlay = show_overlay(st, "Generating batch…")
-        outs = []
-        for i, ln in enumerate(lines, start=1):
-            audio, sr = synthesize_human(bundle, ln)
-            audio = apply_tone(audio, sr, speed=st.session_state.speed, pitch_semitones=st.session_state.pitch)
-            p = OUTPUT_DIR / "app_outputs" / f"{lang_code}_batch_{len(st.session_state.history)+1:03d}_{i:02d}.wav"
-            write_wav(p, audio, sr)
-            outs.append(p)
-
-            item = {
-                "id": f"{lang_code}_b_{len(st.session_state.history)+1:03d}_{i:02d}",
-                "ts": datetime.now().strftime("%H:%M:%S"),
-                "lang_code": lang_code,
-                "voice_name": voice_name,
-                "label": f"Batch • Line {i}",
-                "wav_path": str(p),
-                "sr": sr,
-            }
-            st.session_state.history.append(item)
-
-        hide_overlay(overlay)
-        st.success(f"Generated {len(outs)} clips.")
-        st.session_state.latest_idx = len(st.session_state.history) - 1
-        st.rerun()
-
-    except Exception as e:
-        try:
-            hide_overlay(overlay)
-        except Exception:
-            pass
-        st.error(f"Batch failed: {e}")
-        st.exception(e)
-
-
-def finetune_view(st, lang_code: str):
-    st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-    st.markdown("<div style='font-weight:900;font-size:1.35rem;margin-bottom:0.25rem;'>Fine-tuning (Local)</div>", unsafe_allow_html=True)
-    st.markdown("<div class='oge-muted' style='margin-bottom:0.75rem;'>Run training locally using your HF dataset + finetune-hf-vits.</div>", unsafe_allow_html=True)
-    st.markdown("**Command:**")
-    st.code(f"python app.py --train --lang {lang_code}")  # harmless; code blocks hidden by CSS to avoid stray debug look
-    st.markdown(f"**Outputs:** `{OUTPUT_DIR / lang_code}`")
-    st.markdown("</div>", unsafe_allow_html=True)
+def finetune_view(st):
+    lang_code = LANGUAGES[st.session_state.lang_name]
+    st.markdown(
+        f"""
+<div class="oge-bubble oge-assistant">
+  <div style="font-weight:900;font-size:1.15rem;">Fine-tuning (Local)</div>
+  <div class="oge-muted" style="margin-top:0.35rem; line-height:1.45;">
+    Run training locally using your HF dataset + finetune-hf-vits.
+  </div>
+  <div class="oge-meta" style="margin-top:0.55rem;"><b>Command:</b> python app.py --train --lang {html.escape(lang_code)}</div>
+  <div class="oge-meta"><b>Outputs:</b> {html.escape(str(OUTPUT_DIR / lang_code))}</div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def about_view(st):
-    st.markdown('<div class="oge-card oge-pad">', unsafe_allow_html=True)
-    st.markdown("<div style='font-weight:900;font-size:1.35rem;margin-bottom:0.25rem;'>About</div>", unsafe_allow_html=True)
-    st.markdown("""
-<div class="oge-muted" style="line-height:1.45;">
-Ongea is a clean text-to-speech studio for African voices.
-<br/><br/>
-<b>What it does</b><br/>
-• Ongea: generate one clean clip from pasted text<br/>
-• Batch: generate one WAV per line (studio workflow)<br/>
-• Tone: speed + pitch controls applied at export<br/>
-• History: all generated clips saved during the session<br/><br/>
-<b>Engines</b><br/>
-• Meta MMS (HF VITS) + community voices<br/>
-• Optional Coqui voices via <code>coqui:</code> prefix
+    st.markdown(
+        """
+<div class="oge-bubble oge-assistant">
+  <div style="font-weight:900;font-size:1.15rem;">About Ongea</div>
+  <div class="oge-muted" style="margin-top:0.35rem; line-height:1.45;">
+    Ongea is a Chat-style text-to-speech studio for African voices.
+    <br/><br/>
+    <b>How it works</b><br/>
+    • Type your text (or paste multiple lines in Batch mode)<br/>
+    • The assistant replies with audio clips you can play & download<br/>
+    • Speed + pitch controls are applied during export<br/>
+    <br/>
+    <b>Engines</b><br/>
+    • Meta MMS (HF VITS) + community voices<br/>
+    • Optional Coqui voices via <code>coqui:</code> prefix
+  </div>
 </div>
-""", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
+        """,
+        unsafe_allow_html=True,
+    )
 
 def run_app():
     import streamlit as st
-    st.set_page_config(page_title="Ongea", page_icon="🎙️", layout="wide", initial_sidebar_state="collapsed")
+
+    st.set_page_config(page_title="Ongea Labs", page_icon="🎙️", layout="wide", initial_sidebar_state="expanded")
     _init_state(st)
+    inject_css(st, st.session_state.theme)
 
-    inject_css(st, st.session_state.theme, st.session_state.sidebar_open)
+    # Sidebar (ChatGPT-like)
+    sidebar_nav(st)
 
-    if st.session_state.sidebar_open:
-        render_sidebar(st)
-
-    header_bar(st)
-
-    # Studio always shows language/voice controls at top (even in about/fine-tune)
-    lang_code, voices = studio_top_controls(st)
-
-    st.markdown("<div style='height:0.9rem;'></div>", unsafe_allow_html=True)
+    # Main
+    render_topbar(st)
 
     if st.session_state.view == "studio":
-        studio_layout(st, lang_code, voices)
+        render_chat_thread(st)
+
+        # ChatGPT-style composer
+        placeholder = "Type text to speak… (Batch mode: paste multiple lines, one per line)"
+        prompt = st.chat_input(placeholder)
+        if prompt is not None:
+            do_generate_from_text(st, prompt)
+            st.rerun()
+
     elif st.session_state.view == "finetune":
-        finetune_view(st, lang_code)
+        finetune_view(st)
     else:
         about_view(st)
-
 
 # =========================
 # ENTRYPOINT
