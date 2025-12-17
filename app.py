@@ -936,4 +936,5 @@ if __name__ == "__main__":
     if args.train:
         launch_training(args.lang)
     else:
+        
         run_app()
