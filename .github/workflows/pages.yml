@@ -1,0 +1,57 @@
+# Publishes the studio preview at https://markchweya.github.io/OngeaLabs/
+# through GitHub Actions ("Static HTML": deploy files without a build).
+#
+# What it deploys is the gh-pages branch as it stands: a ready-built static
+# copy of the Ongea studio, made by scripts/ongea-pages.sh in the
+# olkeri.space repository. Nothing is built here.
+#
+# GitHub Pages serves this repository from that branch directly until
+# Settings > Pages > Build and deployment > Source is set to "GitHub
+# Actions". Until then this workflow checks the setting, says so and skips
+# the deploy, so it never fails just because the switch has not been made.
+name: Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/pages.yml]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check the Pages source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build_type=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null || echo none)
+          echo "build_type=$build_type" >> "$GITHUB_OUTPUT"
+          if [ "$build_type" != "workflow" ]; then
+            echo "::notice::Pages is set to '$build_type', not GitHub Actions; the gh-pages branch is being served directly. Skipping."
+          fi
+      - if: steps.source.outputs.build_type == 'workflow'
+        uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+      - if: steps.source.outputs.build_type == 'workflow'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: .
+      - if: steps.source.outputs.build_type == 'workflow'
+        id: deployment
+        uses: actions/deploy-pages@v5

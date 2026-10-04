@@ -1,0 +1,59 @@
+# On every published release: builds the web studio, attaches it to the
+# release as a tarball, and attaches SLSA level 3 provenance for it.
+#
+# The provenance is signed with GitHub's OIDC identity through the OpenSSF
+# SLSA generator and records which workflow, commit and runner produced the
+# tarball, so anyone can check a download really came from this repository:
+#
+#   slsa-verifier verify-artifact ongea-web-<tag>.tar.gz \
+#     --provenance-path ongea-web-<tag>.tar.gz.intoto.jsonl \
+#     --source-uri github.com/markchweya/OngeaLabs --source-tag <tag>
+#
+# Replaces the PyPI publishing template that was here before: this
+# repository has no Python package, so that workflow could only fail.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # to attach the tarball to the release
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package
+        run: tar -czf "ongea-web-${{ github.event.release.tag_name }}.tar.gz" -C dist .
+      - name: Hash
+        id: hash
+        run: echo "hashes=$(sha256sum ongea-web-*.tar.gz | base64 -w0)" >> "$GITHUB_OUTPUT"
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" ongea-web-*.tar.gz --clobber
+
+  provenance:
+    needs: build
+    permissions:
+      actions: read # to read the workflow's own run
+      id-token: write # to sign the provenance
+      contents: write # to attach it to the release
+    # The SLSA generator must be referenced by its release tag, not a commit.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.build.outputs.hashes }}
+      upload-assets: true

@@ -1,0 +1,46 @@
+# Checks every pull request and every push to main: the web studio lints and
+# builds, and the Python voice API at least compiles and has a valid voice
+# list. The API's model dependencies (PyTorch, transformers) are gigabytes,
+# so they are not installed here; the compile step catches syntax mistakes
+# without them.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web studio (lint, typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      # tsc -b, then vite build
+      - run: npm run build
+
+  api:
+    name: Voice API (compile, voice list)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m py_compile backend/*.py
+      - run: python -c "import json; voices = json.load(open('backend/voices.json')); print(f'{len(voices)} voices listed')"
