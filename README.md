@@ -16,26 +16,33 @@ sent to a server.
 
 ## Using it
 
-1. Open the studio and type or paste your text.
-2. Pick a voice from the voice menu at the top.
+1. Open the studio and type or paste your text. The voice follows the
+   language you write in: Kiswahili text goes to a Kiswahili voice, and so
+   on.
+2. To choose a different voice, open the voice menu at the top. Each
+   language lists its own voices, and the one you pick stays that
+   language's voice.
 3. Press the waveform button. The voice starts speaking after the first
    sentence, while the rest are still being made.
 4. Replay the take, scrub through its waveform, or download it as WAV or
    M4A.
 
-The first time you use a language, its voice model is downloaded once and
-kept by your browser. That is about 92 MB for the English voices and about
-38 MB for each of the others. After that it speaks straight away, even
+The first time you use a voice, its model is downloaded once and kept by
+your browser: about 92 MB for all the English voices together, and 20 to
+77 MB for each of the others. After that it speaks straight away, even
 offline on the full site.
 
 ### Voices
 
+Every language has voices of its own, trained on people speaking it, so
+Kiswahili sounds like Kiswahili and not like English read aloud.
+
 | Language | Voices | Model |
 |---|---|---|
+| Kiswahili | Juma, Baraka | [Meta MMS](https://huggingface.co/facebook/mms-tts-swh), [Piper](https://huggingface.co/rhasspy/piper-voices) |
 | English (US and UK) | 16, from soft to deep, plus blends you mix yourself | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) |
-| Kiswahili | Zuri | [Meta MMS](https://huggingface.co/facebook/mms-tts-swh) |
-| Deutsch | Lena | [Meta MMS](https://huggingface.co/facebook/mms-tts-deu) |
-| Français | Amélie | [Meta MMS](https://huggingface.co/facebook/mms-tts-fra) |
+| Deutsch | Thorsten, Kerstin, Ramona, Eva, Karlsson, Lukas | [Piper](https://huggingface.co/rhasspy/piper-voices), [Meta MMS](https://huggingface.co/facebook/mms-tts-deu) |
+| Français | Élise, Jessica, Pierre, Gilles, Antoine | [Piper](https://huggingface.co/rhasspy/piper-voices), [Meta MMS](https://huggingface.co/facebook/mms-tts-fra) |
 
 The tone controls set pace, pitch, warmth and clarity for every voice.
 
@@ -137,7 +144,13 @@ slsa-verifier verify-artifact ongea-web-v1.0.0.tar.gz \
 
 - **The code** in this repository is under the [Apache License 2.0](LICENSE).
 - **Kokoro-82M**, the English voices, is Apache 2.0.
-- **Meta MMS**, the Kiswahili, German and French voices, is
+- **Piper voices** each carry their recording's licence: Thorsten, Kerstin
+  and Gilles are CC0; Élise is CC BY 4.0; Jessica and Pierre are CC BY-SA
+  4.0; Ramona, Eva and Karlsson come from M-AILABS; Baraka comes from the
+  [Lanfrica Kiswahili dataset](https://lanfrica.com/record/kiswahili-tts-dataset),
+  whose terms are on its record. Their pronunciation comes from
+  [espeak-ng](https://github.com/espeak-ng/espeak-ng), GPL 3.
+- **Meta MMS**, the Juma, Lukas and Antoine voices, is
   [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). Those voices
   may not be used commercially. Credit: Pratap et al., *Scaling Speech
   Technology to 1,000+ Languages*, Meta AI, 2023.
