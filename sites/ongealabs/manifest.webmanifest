@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Ongea: text to speech",
+  "short_name": "Ongea",
+  "description": "Type, choose a voice, and hear it spoken: English, Kiswahili, Deutsch and Français, generated on your own device.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050811",
+  "theme_color": "#050811",
+  "categories": ["productivity", "utilities", "education"],
+  "icons": [
+    { "src": "/sites/ongealabs/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/sites/ongealabs/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/sites/ongealabs/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
