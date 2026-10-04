@@ -117,7 +117,7 @@ python -m py_compile backend/*.py
 | Workflow | When it runs | What it does |
 |---|---|---|
 | [CI](.github/workflows/ci.yml) | Every pull request and push to `main` | Lints, type-checks and builds the front end, and compiles the API. |
-| [Pages](.github/workflows/pages.yml) | By hand, or when the workflow changes | Deploys the `gh-pages` branch through GitHub Actions. It skips itself until Settings > Pages > Source is set to "GitHub Actions"; until then GitHub serves that branch directly. |
+| [Pages](.github/workflows/pages.yml) | By hand, or when the workflow changes | Deploys the `gh-pages` branch through GitHub Actions. It skips the deploy until Settings > Pages > Source is set to "GitHub Actions" (until then GitHub serves that branch directly); after switching, allow `main` under Settings > Environments > github-pages. |
 | [Release](.github/workflows/release.yml) | When a release is published | Builds the front end, attaches it to the release, and attaches signed [SLSA level 3](https://slsa.dev) provenance. |
 | [Datadog Synthetics](.github/workflows/datadog-synthetics.yml) | Each push to `main`, and daily | Runs Datadog browser tests against the live studio. Off until the `DD_API_KEY` and `DD_APP_KEY` secrets are added; the file explains the setup. |
 
