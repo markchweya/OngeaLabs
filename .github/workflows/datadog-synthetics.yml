@@ -1,0 +1,56 @@
+# Runs Datadog Synthetic tests against the live studio after each push to
+# main and once a day, so a broken deployment is noticed even when no one
+# is looking at it.
+#
+# Off until it is configured. To turn it on:
+#   1. In Datadog, create Synthetic tests for the studio (for example a
+#      browser test that opens https://markchweya.github.io/OngeaLabs/ and
+#      checks for "What should I say?") and tag them ongea.
+#   2. Add the repository secrets DD_API_KEY and DD_APP_KEY.
+#   3. If your Datadog account is not on datadoghq.com, add the repository
+#      variable DD_SITE (for example datadoghq.eu).
+# Without the secrets, the run notes that it is not configured and passes.
+name: Datadog Synthetics
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.keys.outputs.configured }}
+    steps:
+      - id: keys
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+        run: |
+          if [ -n "$DD_API_KEY" ] && [ -n "$DD_APP_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Datadog Synthetics is not configured (no DD_API_KEY / DD_APP_KEY secrets). Skipping."
+          fi
+
+  synthetics:
+    needs: check
+    if: needs.check.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # Pinned to v4.1.1 by commit: a third-party action handed API keys.
+      - uses: DataDog/synthetics-ci-github-action@7039855343386c30068a97ca381e68ea405e8539
+        with:
+          api-key: ${{ secrets.DD_API_KEY }}
+          app-key: ${{ secrets.DD_APP_KEY }}
+          datadog-site: ${{ vars.DD_SITE || 'datadoghq.com' }}
+          test-search-query: 'tag:ongea'
