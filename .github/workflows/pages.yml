@@ -7,8 +7,13 @@
 #
 # GitHub Pages serves this repository from that branch directly until
 # Settings > Pages > Build and deployment > Source is set to "GitHub
-# Actions". Until then this workflow checks the setting, says so and skips
-# the deploy, so it never fails just because the switch has not been made.
+# Actions". Until then the first job sees that, says so, and the deploy job
+# is skipped: it never starts, so the github-pages environment (which,
+# set up for branch deploys, only admits the gh-pages branch) is not asked.
+#
+# After switching the source, allow main to deploy: Settings >
+# Environments > github-pages > Deployment branches, add main.
+
 name: Pages
 
 on:
@@ -27,31 +32,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  source:
+    name: Check the Pages source
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      build_type: ${{ steps.source.outputs.build_type }}
     steps:
-      - name: Check the Pages source
-        id: source
+      - id: source
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           build_type=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null || echo none)
           echo "build_type=$build_type" >> "$GITHUB_OUTPUT"
           if [ "$build_type" != "workflow" ]; then
-            echo "::notice::Pages is set to '$build_type', not GitHub Actions; the gh-pages branch is being served directly. Skipping."
+            echo "::notice::Pages is set to '$build_type', not GitHub Actions; the gh-pages branch is being served directly. Skipping the deploy."
           fi
-      - if: steps.source.outputs.build_type == 'workflow'
-        uses: actions/checkout@v7
+
+  deploy:
+    needs: source
+    if: needs.source.outputs.build_type == 'workflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
         with:
           ref: gh-pages
-      - if: steps.source.outputs.build_type == 'workflow'
-        uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: .
-      - if: steps.source.outputs.build_type == 'workflow'
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v5
