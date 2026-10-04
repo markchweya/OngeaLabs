@@ -6,8 +6,10 @@
 
   Everything runs in the visitor's browser on ONNX Runtime's WebAssembly
   build: no audio and no text ever leaves the device. Models download once
-  from Hugging Face (or, for Swahili, from this site) and stay in the
-  browser's cache, so the second visit speaks at once.
+  from Hugging Face (or, for the MMS Swahili voice, from this site) and
+  stay in the browser's cache, so the second visit speaks at once. Three
+  engines (voices.ts): Kokoro for English, Piper (piper.ts) and MMS for
+  Kiswahili, German and French.
 
   Messages in:  { type: 'speak', id, text, voice, speed }
                 voice is a base voice id (voices.ts) or { recipe } (blend.ts)
@@ -28,6 +30,7 @@ import { KokoroTTS } from 'kokoro-js'
 
 import { STYLE_ROWS, STYLE_WIDTH, mixStyles, normaliseRecipe, recipeKey, type Recipe } from '@/lib/ongea/blend'
 import { asset } from '@/lib/ongea/paths'
+import { piperSpeaker } from '@/lib/ongea/piper'
 import { MAX_TEXT, SENTENCE_GAP_SECONDS, joinWithGaps, splitSentences } from '@/lib/ongea/text'
 import { KOKORO_MODEL, MMS_MODELS, baseVoice } from '@/lib/ongea/voices'
 
@@ -247,6 +250,38 @@ async function speakMms(text: string, voice: string, speed: number, report: Repo
   return { audio: joinWithGaps(chunks, sampleRate), sampleRate }
 }
 
+/* ----------------------------------------------------------------- Piper */
+
+async function speakPiper(text: string, voice: string, speed: number, report: Reporter, emit: Emitter) {
+  const speaker = piperSpeaker(voice)
+  // The phonemizer's data (first Piper voice only) and the model, as one figure.
+  const files = new Map<string, { loaded: number; total: number }>()
+  await speaker.ready((file, loaded, total) => {
+    files.set(file, { loaded, total })
+    let sum = 0
+    let all = 0
+    for (const entry of files.values()) {
+      sum += entry.loaded
+      all += entry.total
+    }
+    report('download', sum, all)
+  })
+
+  const sampleRate = speaker.sampleRate()
+  const sentences = splitSentences(text)
+  const chunks: Float32Array[] = []
+  for (const [index, sentence] of sentences.entries()) {
+    report('speak', index, sentences.length)
+    const audio = await speaker.say(sentence, speed)
+    if (audio.length === 0) continue
+    chunks.push(audio)
+    emit(chunks, sampleRate)
+  }
+  if (chunks.length === 0) throw new Error('There was nothing in that text this voice could say.')
+
+  return { audio: joinWithGaps(chunks, sampleRate), sampleRate }
+}
+
 /* ---------------------------------------------------------------- shared */
 
 type Reporter = (stage: 'download' | 'prepare' | 'speak', loaded: number, total: number) => void
@@ -302,7 +337,9 @@ self.addEventListener('message', (event: MessageEvent<SpeakRequest>) => {
       const result =
         isBlend || base?.engine === 'kokoro'
           ? await speakKokoro(text, request.voice, speed, report, emit)
-          : await speakMms(text, base!.id, speed, report, emit)
+          : base?.engine === 'piper'
+            ? await speakPiper(text, base.id, speed, report, emit)
+            : await speakMms(text, base!.id, speed, report, emit)
 
       post({ type: 'done', id: request.id, audio: result.audio, sampleRate: result.sampleRate }, [result.audio.buffer])
     } catch (error) {
