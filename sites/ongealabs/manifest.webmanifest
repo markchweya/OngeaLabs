@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Ongea: text to speech",
   "short_name": "Ongea",
-  "description": "Type, choose a voice, and hear it spoken: English, Kiswahili, Deutsch and Français, generated on your own device.",
+  "description": "Type, choose a voice, and hear it spoken: Kiswahili, English, Deutsch, Français and Polski, generated on your own device.",
   "lang": "en",
   "start_url": "/",
   "scope": "/",
