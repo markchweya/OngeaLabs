@@ -3,7 +3,7 @@
 **Type something. Choose a voice. Hear it spoken.**
 
 Ongea (Kiswahili for *speak*) is a text-to-speech studio for Kiswahili,
-English, German and French. The current studio runs entirely in your web
+English, German, French and Polish. The current studio runs entirely in your web
 browser: there is nothing to install or sign up for, and nothing you type is
 sent to a server.
 
@@ -43,6 +43,7 @@ Kiswahili sounds like Kiswahili and not like English read aloud.
 | English (US and UK) | 16, from soft to deep, plus blends you mix yourself | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) |
 | Deutsch | Thorsten, Kerstin, Ramona, Eva, Karlsson, Lukas | [Piper](https://huggingface.co/rhasspy/piper-voices), [Meta MMS](https://huggingface.co/facebook/mms-tts-deu) |
 | Français | Élise, Jessica, Pierre, Gilles, Antoine | [Piper](https://huggingface.co/rhasspy/piper-voices), [Meta MMS](https://huggingface.co/facebook/mms-tts-fra) |
+| Polski | Gosia, Darek, Mateusz | [Piper](https://huggingface.co/rhasspy/piper-voices) |
 
 The tone controls set pace, pitch, warmth and clarity for every voice.
 
@@ -140,20 +141,48 @@ slsa-verifier verify-artifact ongea-web-v1.0.0.tar.gz \
   --source-tag v1.0.0
 ```
 
+## Credits
+
+Ongea's own work is the studio and its speech engine: the in-browser
+worker that streams speech sentence by sentence, the Piper runner,
+language detection, the voice shaper, and the voice library that breeds
+new English voices from listeners' ratings. The voices themselves are
+open models trained by others on the datasets below. Thank you to
+everyone who recorded, collected and released them.
+
+### Models
+
+| Voices | Model | By | Licence |
+|---|---|---|---|
+| English (16) | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | hexgrad | Apache 2.0 |
+| Juma, Lukas, Antoine | [MMS-TTS](https://huggingface.co/facebook/mms-tts) | Meta AI | CC BY-NC 4.0 (non-commercial) |
+| All other voices | [Piper voices](https://huggingface.co/rhasspy/piper-voices) | Rhasspy / Open Home Foundation | MIT, with each voice's data licence below |
+
+### Datasets
+
+| Voice | Dataset | By | Licence |
+|---|---|---|---|
+| Baraka | [A Kiswahili Dataset for Development of Text-To-Speech System](https://data.mendeley.com/datasets/vbvj6j6pm9/1) | Mendeley Data, 2021 | CC BY 4.0 |
+| Thorsten | [Thorsten-Voice](https://github.com/thorstenMueller/Thorsten-Voice) | Thorsten Müller | CC0 |
+| Kerstin | [dataset-voice-kerstin](https://github.com/rhasspy/dataset-voice-kerstin) | Rhasspy | CC0 |
+| Ramona, Eva, Karlsson | [The M-AILABS Speech Dataset](https://www.caito.de/2019/01/03/the-m-ailabs-speech-dataset/) | M-AILABS | BSD-style |
+| Élise | [SIWIS French Speech Synthesis Database](https://datashare.is.ed.ac.uk/handle/10283/2353) | Idiap / University of Edinburgh | CC BY 4.0 |
+| Jessica, Pierre | [UPMC voice data](https://github.com/marytts/upmc-pierre-data) | MaryTTS | CC BY-SA 4.0 |
+| Gilles | [CSS10 French](https://www.kaggle.com/datasets/bryanpark/french-single-speaker-speech-dataset) | Kyubyong Park, Tommy Mulc | CC0 |
+| Gosia, Darek | [OHF voice datasets](https://github.com/OHF-Voice/voice-datasets) | Open Home Foundation | CC0 |
+| Mateusz | [The MC Speech Dataset](https://www.kaggle.com/datasets/czyzi0/the-mc-speech-dataset) | Mateusz Czyżnikiewicz | CC0 |
+
+Pronunciation for the Piper voices comes from
+[espeak-ng](https://github.com/espeak-ng/espeak-ng) (GPL 3). Meta MMS
+credit: Pratap et al., *Scaling Speech Technology to 1,000+ Languages*,
+Meta AI, 2023.
+
 ## Licences
 
 - **The code** in this repository is under the [Apache License 2.0](LICENSE).
-- **Kokoro-82M**, the English voices, is Apache 2.0.
-- **Piper voices** each carry their recording's licence: Thorsten, Kerstin
-  and Gilles are CC0; Élise is CC BY 4.0; Jessica and Pierre are CC BY-SA
-  4.0; Ramona, Eva and Karlsson come from M-AILABS; Baraka comes from the
-  [Lanfrica Kiswahili dataset](https://lanfrica.com/record/kiswahili-tts-dataset),
-  whose terms are on its record. Their pronunciation comes from
-  [espeak-ng](https://github.com/espeak-ng/espeak-ng), GPL 3.
-- **Meta MMS**, the Juma, Lukas and Antoine voices, is
-  [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). Those voices
-  may not be used commercially. Credit: Pratap et al., *Scaling Speech
-  Technology to 1,000+ Languages*, Meta AI, 2023.
+- **The voices** keep their own licences, listed under Credits. The MMS
+  voices (Juma, Lukas, Antoine) may not be used commercially; Jessica and
+  Pierre are share-alike.
 
 ## Contributing
 
